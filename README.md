@@ -112,6 +112,11 @@ To stop the server from within Slicer: `mcpLogic.stop()`
   [Imaging Data Commons](https://portal.imaging.datacommons.cancer.gov/)
   (IDC), published at
   [ImagingDataCommons/idc-claude-skill](https://github.com/ImagingDataCommons/idc-claude-skill).
+* **[SlicerChat: Building a Local Chatbot for 3D Slicer](https://arxiv.org/abs/2407.11987)**
+  (Barr, 2024) — explores integrating a locally-run LLM (Code-Llama Instruct) into 3D Slicer
+  to assist users with the software's steep learning curve, investigating the effects of
+  fine-tuning, model size, and domain knowledge (Python samples, Markdown docs, Discourse
+  forums) on answer quality.
 
 ### Security warning
 
