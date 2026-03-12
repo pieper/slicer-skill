@@ -30,6 +30,11 @@ When invoked the skill should ensure it has a local copy of the relevant Slicer 
 3. The **Discourse archive** – a mirror of the Slicer Discourse forum content (see
    https://github.com/pieper/slicer-discourse-archive) to allow question‑answering based on
    past community discussions.
+4. **Coding conversations** (optional) – JSONL transcripts of AI-assisted coding sessions
+   captured by the [CodingChats](https://github.com/pieper/CodingChats) VS Code extension.
+   These contain the full back-and-forth (prompts, tool calls, corrections, dead ends) that
+   led to commits in Slicer-related repositories.  They help agents understand *how* code
+   was developed and what prompting patterns are effective.
 
 With these resources available locally, the agent can use standard command‑line tools
 (`git grep`, `grep`, `find`, etc.) to search for symbols, examples, documentation,
@@ -37,9 +42,10 @@ Python modules, build configurations, and other snippets that help it craft accu
 precise responses to programming questions about Slicer.
 
 > 📁 Repositories are checked out into subdirectories of the skill workspace named
-> `slicer-source`, `slicer-extensions`, `slicer-discourse` and `slicer-dependencies` respectively.
-> You are free to override these paths by setting the `SLICER_SRC_DIR`, `SLICER_EXT_DIR`,
-> `SLICER_DISCOURSE_DIR` and `SLICER_DEP_DIR` environment variables before running the setup script.
+> `slicer-source`, `slicer-extensions`, `slicer-discourse`, `slicer-dependencies`, and
+> `coding-chats` respectively.  You are free to override these paths by setting the
+> `SLICER_SRC_DIR`, `SLICER_EXT_DIR`, `SLICER_DISCOURSE_DIR`, `SLICER_DEP_DIR`, and
+> `CODING_CHATS_DIR` environment variables before running the setup script.
 
 ---
 
@@ -78,6 +84,10 @@ On success it will create/update the following folders:
   DCMTK, teem, etc.) placed next to `slicer-source`. These checkouts mirror the exact
   repository URLs and git tags/commits referenced by the Slicer SuperBuild and are useful
   for inspecting build-time APIs, headers, and dependency versions.
+- `coding-chats` (optional) – a clone of a CodingChats conversations repository containing
+  JSONL transcripts of AI-assisted coding sessions.  Cloned only if the
+  `CODING_CHATS_REPO` environment variable is set (e.g.
+  `CODING_CHATS_REPO=https://github.com/pieper/CodingChats-conversations.git`).
 
 The script is idempotent; re-running it will `git pull` existing clones rather than cloning
 afresh.  On completion it writes a `.setup-stamp.json` timestamp file. Subsequent runs
@@ -94,6 +104,8 @@ After the script finishes, confirm the key directories exist:
 
 ```sh
 ls slicer-source/CMakeLists.txt slicer-extensions/README.md slicer-discourse/README.md slicer-dependencies/VTK
+# If CODING_CHATS_REPO was set:
+ls coding-chats/INDEX.md
 ```
 
 If any path is missing, re-run `./setup.sh` and check for error output.
@@ -120,6 +132,10 @@ over them to answer Slicer programming questions.  The key strategies are:
 - **Inspect build dependencies** in `slicer-dependencies` when reasoning about
   build-time behavior, API versions, or exact tags used by the SuperBuild.
   CLI example: `git -C slicer-dependencies/VTK grep -rn "vtkNew"`.
+- **Search coding conversations** in `coding-chats/sessions/` for past AI sessions
+  that discuss the same topic.  These JSONL transcripts show what approaches were
+  tried, what failed, and what prompts led to working solutions.
+  CLI example: `grep -rn "SegmentEditor" coding-chats/sessions/`.
 - **Understand project structure** by reading CMakeLists, Python `__init__.py` files, and
   other configuration files in the clones.
 
@@ -470,8 +486,9 @@ or agent) should follow these principles when extending it:
    features specific to a single agent runtime.  The frontmatter uses only fields
    from the open Agent Skills standard.
 
-6. **Leverage all four data sources.**  The unique strength of this skill is the
-   combination of source code, extensions, dependencies, and community discussions.
+6. **Leverage all five data sources.**  The unique strength of this skill is the
+   combination of source code, extensions, dependencies, community discussions,
+   and coding conversations.
    When adding new sections, consider whether the agent should cross-reference
    multiple sources — for example, a discourse search may explain *why* something
    works a certain way when the source code only shows *how*.

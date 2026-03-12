@@ -259,6 +259,25 @@ fi
 # 3. discourse archive
 clone_or_pull "https://github.com/pieper/slicer-discourse-archive.git" "$SLICER_DISCOURSE_DIR"
 
+# 4. coding conversations (optional)
+# If CODING_CHATS_REPO is set explicitly, use that. Otherwise, auto-detect:
+# check if `gh` is installed, discover the current GitHub user, and see if they
+# have a CodingChats-conversations repo.
+: "${CODING_CHATS_DIR:=coding-chats}"
+if [ -z "${CODING_CHATS_REPO:-}" ] && command -v gh >/dev/null 2>&1; then
+    gh_user=$(gh api user --jq '.login' 2>/dev/null || true)
+    if [ -n "$gh_user" ]; then
+        candidate="https://github.com/${gh_user}/CodingChats-conversations.git"
+        if gh repo view "${gh_user}/CodingChats-conversations" >/dev/null 2>&1; then
+            CODING_CHATS_REPO="$candidate"
+            echo "Found coding conversations repo: $candidate"
+        fi
+    fi
+fi
+if [ -n "${CODING_CHATS_REPO:-}" ]; then
+    clone_or_pull "$CODING_CHATS_REPO" "$CODING_CHATS_DIR"
+fi
+
 # Write timestamp so subsequent runs can skip if recent enough
 printf '{"epoch": %d, "iso": "%s"}\n' "$(date +%s)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$STAMP_FILE"
 
