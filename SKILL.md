@@ -43,7 +43,7 @@ precise responses to programming questions about Slicer.
 
 > 📁 Repositories are checked out into subdirectories of the skill workspace named
 > `slicer-source`, `slicer-extensions`, `slicer-discourse`, `slicer-dependencies`, and
-> `coding-chats` respectively.  You are free to override these paths by setting the
+> `CodingChats-conversations` respectively.  You are free to override these paths by setting the
 > `SLICER_SRC_DIR`, `SLICER_EXT_DIR`, `SLICER_DISCOURSE_DIR`, `SLICER_DEP_DIR`, and
 > `CODING_CHATS_DIR` environment variables before running the setup script.
 
@@ -84,7 +84,7 @@ On success it will create/update the following folders:
   DCMTK, teem, etc.) placed next to `slicer-source`. These checkouts mirror the exact
   repository URLs and git tags/commits referenced by the Slicer SuperBuild and are useful
   for inspecting build-time APIs, headers, and dependency versions.
-- `coding-chats` (optional) – a clone of a CodingChats conversations repository containing
+- `CodingChats-conversations` (optional) – a clone of a CodingChats conversations repository containing
   JSONL transcripts of AI-assisted coding sessions.  Cloned only if the
   `CODING_CHATS_REPO` environment variable is set (e.g.
   `CODING_CHATS_REPO=https://github.com/pieper/CodingChats-conversations.git`).
@@ -105,7 +105,7 @@ After the script finishes, confirm the key directories exist:
 ```sh
 ls slicer-source/CMakeLists.txt slicer-extensions/README.md slicer-discourse/README.md slicer-dependencies/VTK
 # If CODING_CHATS_REPO was set:
-ls coding-chats/INDEX.md
+ls CodingChats-conversations/INDEX.md
 ```
 
 If any path is missing, re-run `./setup.sh` and check for error output.
@@ -132,10 +132,10 @@ over them to answer Slicer programming questions.  The key strategies are:
 - **Inspect build dependencies** in `slicer-dependencies` when reasoning about
   build-time behavior, API versions, or exact tags used by the SuperBuild.
   CLI example: `git -C slicer-dependencies/VTK grep -rn "vtkNew"`.
-- **Search coding conversations** in `coding-chats/sessions/` for past AI sessions
+- **Search coding conversations** in `CodingChats-conversations/sessions/` for past AI sessions
   that discuss the same topic.  These JSONL transcripts show what approaches were
   tried, what failed, and what prompts led to working solutions.
-  CLI example: `grep -rn "SegmentEditor" coding-chats/sessions/`.
+  CLI example: `grep -rn "SegmentEditor" CodingChats-conversations/sessions/`.
 - **Understand project structure** by reading CMakeLists, Python `__init__.py` files, and
   other configuration files in the clones.
 

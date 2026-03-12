@@ -263,7 +263,7 @@ clone_or_pull "https://github.com/pieper/slicer-discourse-archive.git" "$SLICER_
 # If CODING_CHATS_REPO is set explicitly, use that. Otherwise, auto-detect:
 # check if `gh` is installed, discover the current GitHub user, and see if they
 # have a CodingChats-conversations repo.
-: "${CODING_CHATS_DIR:=coding-chats}"
+: "${CODING_CHATS_DIR:=CodingChats-conversations}"
 if [ -z "${CODING_CHATS_REPO:-}" ] && command -v gh >/dev/null 2>&1; then
     gh_user=$(gh api user --jq '.login' 2>/dev/null || true)
     if [ -n "$gh_user" ]; then
