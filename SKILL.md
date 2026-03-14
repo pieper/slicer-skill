@@ -6,7 +6,7 @@ description: >
   VTK/ITK pipelines, Slicer Python scripting, C++ module development,
   extension development, Qt-based module UI, segmentation, volume rendering,
   DICOM workflows, and the Slicer build system.
-version: "1.0"
+version: "1.1"
 setup: ./setup.sh
 requires: [git, perl, bash]
 ---
@@ -18,30 +18,45 @@ that is designed to answer questions about the [3D Slicer](https://www.slicer.or
 its extension ecosystem.  It is intentionally generic so that it can be consumed by any tool that
 understands the SKILLS.md convention (e.g. Claude Code, OpenAI agents, etc.).
 
+## Setup Modes
+
+The setup script (`./setup.sh`) supports three modes, balancing disk usage against
+query speed.  On first run it prompts the user to choose; subsequent runs reuse the
+previous choice.  The mode is recorded in `.setup-stamp.json` (the `"mode"` field).
+
+| Mode          | Disk    | Setup time | What's local                                         |
+| ------------- | ------- | ---------- | ---------------------------------------------------- |
+| **full**      | ~15 GB  | ~20 min    | Source, deps, all 200+ extensions, discourse archive  |
+| **lightweight**| ~1 GB  | ~2 min     | Source + ExtensionsIndex metadata (JSON only)         |
+| **web**       | minimal | instant    | Nothing cloned — all access via web APIs              |
+
+You can override interactively or via `./setup.sh --mode full|lightweight|web`.
+
+**Determining the active mode:** Read `.setup-stamp.json` in the skill workspace.
+The `"mode"` field will be `"full"`, `"lightweight"`, or `"web"`.  If the file does
+not exist, setup has not been run yet — run `./setup.sh` first.
+
 ## Goal
 
-When invoked the skill should ensure it has a local copy of the relevant Slicer resources:
+Depending on the active mode, the skill provides access to these resources either
+locally (via cloned repositories) or remotely (via web APIs):
 
 1. The **Slicer source code** – the official C++/Python repositories that make up the
-   application.
+   application.  *(Local in full and lightweight modes.)*
 2. The **Extensions Index** – a machine‑readable list of third‑party extensions and their
-   repositories.  The skill should iterate through the index files and clone each listed
-   repository so that extension code is available for searching.
-3. The **Discourse archive** – a mirror of the Slicer Discourse forum content (see
-   https://github.com/pieper/slicer-discourse-archive) to allow question‑answering based on
-   past community discussions.
-4. **Coding conversations** (optional) – JSONL transcripts of AI-assisted coding sessions
+   repositories.  In full mode, all extension repos are cloned locally.  In lightweight
+   mode, only the index JSON files are local — extension repos are cloned on-demand as
+   needed.  In web mode, extension metadata is fetched via GitHub API.
+3. The **Discourse forum** – community discussions about Slicer.  In full mode, a local
+   mirror of the archive (https://github.com/pieper/slicer-discourse-archive) is available
+   for grep.  In lightweight and web modes, use the Discourse search API instead.
+4. **Build dependencies** (VTK, ITK, CTK, etc.) – cloned from SuperBuild references.
+   *(Local in full mode only.  In other modes, browse via GitHub API.)*
+5. **Coding conversations** (optional) – JSONL transcripts of AI-assisted coding sessions
    captured by the [CodingChats](https://github.com/pieper/CodingChats) VS Code extension.
-   These contain the full back-and-forth (prompts, tool calls, corrections, dead ends) that
-   led to commits in Slicer-related repositories.  They help agents understand *how* code
-   was developed and what prompting patterns are effective.
+   *(Cloned in full and lightweight modes when the repo exists.)*
 
-With these resources available locally, the agent can use standard command‑line tools
-(`git grep`, `grep`, `find`, etc.) to search for symbols, examples, documentation,
-Python modules, build configurations, and other snippets that help it craft accurate and
-precise responses to programming questions about Slicer.
-
-> 📁 Repositories are checked out into subdirectories of the skill workspace named
+> 📁 Local repositories are checked out into subdirectories of the skill workspace named
 > `slicer-source`, `slicer-extensions`, `slicer-discourse`, `slicer-dependencies`, and
 > `CodingChats-conversations` respectively.  You are free to override these paths by setting the
 > `SLICER_SRC_DIR`, `SLICER_EXT_DIR`, `SLICER_DISCOURSE_DIR`, `SLICER_DEP_DIR`, and
@@ -53,83 +68,107 @@ precise responses to programming questions about Slicer.
 
 The setup script requires the following tools to be available on `$PATH`:
 
-- **git** – for cloning and updating repositories.
-- **perl** – used to parse CMake files when resolving SuperBuild dependencies.
+- **git** – for cloning and updating repositories (not needed in web mode).
+- **perl** – used to parse CMake files when resolving SuperBuild dependencies (full mode only).
 - **bash** – the setup script targets Bash (macOS `/bin/bash` or Linux).
 
 On macOS the built-in versions of these tools are sufficient. On minimal Linux
 containers you may need to install `perl` and `git` explicitly.
 
+For **web mode**, the agent needs network access to `github.com` and
+`discourse.slicer.org`.  If the `gh` CLI is authenticated, GitHub API rate limits
+are much higher (5,000/hr vs 60/hr unauthenticated).
+
 ---
 
 ## Setup Instructions
 
-The easiest way to obtain and refresh the necessary data is by running the provided shell
-script:
+Run the setup script:
 
 ```sh
-./setup.sh
+./setup.sh              # interactive mode selection on first run
+./setup.sh --mode full  # or: lightweight, web
+./setup.sh --force      # re-run ignoring 24h cooldown
 ```
 
-On success it will create/update the following folders:
+The script checks available disk space and warns if full mode may be tight.
+On first run it presents an interactive menu; subsequent runs reuse the previous
+choice (stored in `.setup-stamp.json`).
 
-- `slicer-source` – a `git clone` of `https://github.com/Slicer/Slicer.git` (branch `main` by
-  default).
-- `slicer-extensions` – a `git clone` of the official [Slicer ExtensionsIndex](https://github.com/Slicer/ExtensionsIndex).
-  After cloning it enumerates the JSON index files and clones every extension repository it
-  references.
-- `slicer-discourse` – a `git clone` of
-  `https://github.com/pieper/slicer-discourse-archive`.
-- `slicer-dependencies` – clones of the SuperBuild dependency repositories (VTK, ITK, CTK,
-  DCMTK, teem, etc.) placed next to `slicer-source`. These checkouts mirror the exact
-  repository URLs and git tags/commits referenced by the Slicer SuperBuild and are useful
-  for inspecting build-time APIs, headers, and dependency versions.
-- `CodingChats-conversations` (optional) – a clone of a CodingChats conversations repository containing
-  JSONL transcripts of AI-assisted coding sessions.  Cloned only if the
-  `CODING_CHATS_REPO` environment variable is set (e.g.
-  `CODING_CHATS_REPO=https://github.com/pieper/CodingChats-conversations.git`).
+### What each mode creates
+
+**Full mode** creates/updates:
+- `slicer-source` – `git clone` of `https://github.com/Slicer/Slicer.git`
+- `slicer-extensions` – ExtensionsIndex + all ~200 extension repositories
+- `slicer-discourse` – `git clone` of the discourse archive
+- `slicer-dependencies` – SuperBuild dependency repositories (VTK, ITK, CTK, etc.)
+- `CodingChats-conversations` (optional) – coding session transcripts
+
+**Lightweight mode** creates/updates:
+- `slicer-source` – same as full
+- `slicer-extensions` – ExtensionsIndex JSON metadata only (no extension repo clones)
+- `CodingChats-conversations` (optional) – same as full
+
+**Web mode** creates:
+- Only `.setup-stamp.json` — no repositories are cloned
 
 The script is idempotent; re-running it will `git pull` existing clones rather than cloning
 afresh.  On completion it writes a `.setup-stamp.json` timestamp file. Subsequent runs
 automatically skip if the stamp is less than 24 hours old. Pass `--force` to bypass the
-age check:
+age check.
+
+### Switching modes
+
+To switch from one mode to another, pass the new mode explicitly:
 
 ```sh
-./setup.sh --force
+./setup.sh --force --mode full    # upgrade from lightweight to full
+./setup.sh --force --mode web     # downgrade (existing clones remain on disk)
 ```
+
+Note: switching to a lighter mode does not delete existing clones. The agent will
+simply stop using them. Delete the directories manually if you want to reclaim space.
 
 ### Verifying the setup
 
-After the script finishes, confirm the key directories exist:
-
 ```sh
+cat .setup-stamp.json   # check "mode" field
+# Full mode:
 ls slicer-source/CMakeLists.txt slicer-extensions/README.md slicer-discourse/README.md slicer-dependencies/VTK
-# If CODING_CHATS_REPO was set:
-ls CodingChats-conversations/INDEX.md
+# Lightweight mode:
+ls slicer-source/CMakeLists.txt slicer-extensions/README.md
+# Web mode: nothing to verify locally
 ```
-
-If any path is missing, re-run `./setup.sh` and check for error output.
-
-> **Disk space and time:** A full clone (source + all extensions + dependencies + discourse)
-> requires roughly 10–15 GB and can take 20+ minutes on a typical connection. You can
-> limit which extensions are fetched by setting the `EXTENSION_FILTER` variable in
-> `setup.sh` or by manually checking out only the subset you need.
 
 ---
 
 ## How the Agent Should Use the Data
 
-Once the repositories are available the agent should search, read, and reason
-over them to answer Slicer programming questions.  The key strategies are:
+**First, check the active mode** by reading `.setup-stamp.json` in the skill workspace
+and looking at the `"mode"` field.  This determines which search strategies are available.
+
+> **Performance hint:** If you are in `web` or `lightweight` mode and a task is taking
+> noticeably long due to repeated API calls, rate-limit errors, or slow web fetches,
+> proactively suggest that the user upgrade to a heavier mode for faster local searches.
+> For example: *"This search is slow over the GitHub API. You could switch to
+> lightweight mode (`./setup.sh --force --mode lightweight`) to get local source
+> for much faster grep, or full mode (`./setup.sh --force --mode full`) to also
+> have extensions, dependencies, and the discourse archive on disk."*
+> Match the suggestion to what's actually bottlenecking — if only Discourse searches
+> are slow, suggest full mode; if code search is slow, lightweight may suffice.
+
+### Local search strategies (full and lightweight modes)
+
+When repositories are available locally, search, read, and reason over them:
 
 - **Search for code symbols** across `slicer-source`, extension subdirectories, or
   `slicer-dependencies`.
   CLI example: `git -C slicer-source grep -rn "vtkSmartPointer"`.
 - **Find files by name or pattern** — locate headers, Python modules, CMake configs, etc.
   CLI example: `find slicer-source -name "*Logic.h"`.
-- **Query the discourse archive** for community discussions about a topic.
+- **Query the discourse archive** (full mode) for community discussions about a topic.
   CLI example: `grep -rn "SegmentEditor" slicer-discourse`.
-- **Inspect build dependencies** in `slicer-dependencies` when reasoning about
+- **Inspect build dependencies** (full mode) in `slicer-dependencies` when reasoning about
   build-time behavior, API versions, or exact tags used by the SuperBuild.
   CLI example: `git -C slicer-dependencies/VTK grep -rn "vtkNew"`.
 - **Search coding conversations** in `CodingChats-conversations/sessions/` for past AI sessions
@@ -143,9 +182,42 @@ over them to answer Slicer programming questions.  The key strategies are:
 > should prefer those over raw shell commands when available.  The CLI examples above are
 > provided for reference and for agents that only have shell access.
 
+### On-demand extension cloning (lightweight mode)
+
+In lightweight mode, extension source code is not pre-cloned. When you need to search
+or read an extension's source:
+
+1. Find the extension's repository URL from the ExtensionsIndex JSON file:
+   `grep -l "ExtensionName" slicer-extensions/*.json` then read the `"scm_url"` field.
+2. Clone it on-demand: `git clone --depth 1 <url> slicer-extensions/<name>`
+3. The clone persists for future queries in the same session.
+
+### Web-based search strategies (lightweight fallback and web mode)
+
+When local data is not available, use these web APIs:
+
+- **Discourse search**: `curl -s "https://discourse.slicer.org/search.json?q=<query>"`
+  Supports filters: `category:support`, `order:latest`, `after:2025-01-01`.
+  Read a topic: `curl -s "https://discourse.slicer.org/t/<id>.json"`
+- **GitHub code search** (requires `gh` CLI): `gh search code "<query>" --repo Slicer/Slicer --limit 20`
+- **Read files from GitHub**: `gh api repos/Slicer/Slicer/contents/<path> --jq '.content' | base64 -d`
+  Or raw URLs: `https://raw.githubusercontent.com/Slicer/Slicer/main/<path>`
+- **Extension metadata**: `gh api repos/Slicer/ExtensionsIndex/contents/<Name>.json --jq '.content' | base64 -d`
+- **Dependency source**: `gh search code "<query>" --repo Kitware/VTK --limit 20`
+
+### Search strategy by mode
+
+| Resource         | full               | lightweight           | web                    |
+| ---------------- | ------------------ | --------------------- | ---------------------- |
+| Slicer source    | local grep/find    | local grep/find       | GitHub API / raw URLs  |
+| Extensions       | local grep/find    | on-demand clone       | GitHub API / raw URLs  |
+| Dependencies     | local grep/find    | GitHub API / raw URLs | GitHub API / raw URLs  |
+| Discourse        | local grep         | Discourse search API  | Discourse search API   |
+| Coding chats     | local grep         | local grep            | not available          |
+
 The goal is not merely to index, but to *reason* over the material.  For example, when
 asked "how do I add a module to the build", the agent can search CMake macros in
-`slicer-source` and provide a snippet of the real call sites.
+`slicer-source` (or via GitHub API) and provide a snippet of the real call sites.
 
 ### Script Repository
 
@@ -356,7 +428,9 @@ To understand how Slicer modules are tested:
   environment questions including `PythonSlicer`, virtual environments, and
   package installation.
 
-### Discourse Archive — Searching Community Knowledge
+### Discourse — Searching Community Knowledge
+
+**Full mode (local archive):**
 
 The discourse archive contains ~18,700 rendered forum topics organized by year and month:
 
@@ -372,9 +446,12 @@ date, a human-readable slug, and the topic ID.  To search effectively:
 
 - Grep across the archive for keywords (e.g. `grep -rn "arrayFromVolume" slicer-discourse/`).
 - Use the `slicer-discourse/archive/INDEX.md` file for an overview.
-- When code-search in `slicer-source` is insufficient, search the discourse archive
-  for community workarounds, tips, and explanations — forum threads often explain
-  *why* things work a certain way, not just *how*.
+
+**Lightweight and web modes:** Use the Discourse search API as described in the
+"Web-based search strategies" section above.
+
+In any mode, forum threads often explain *why* things work a certain way, not
+just *how* — search the discourse when code-search alone is insufficient.
 
 ---
 
@@ -476,7 +553,7 @@ or agent) should follow these principles when extending it:
    discoverable by code search.  New pitfalls should be added here only when they
    meet this bar.
 
-4. **Keep the file under 500 lines.**  The Agent Skills convention recommends concise
+4. **Keep the file under 600 lines.**  The Agent Skills convention recommends concise
    skill files to avoid overwhelming the agent's context window.  If this file
    approaches the limit, move detailed content to supporting files in a `references/`
    directory and link to them from here.
@@ -486,12 +563,18 @@ or agent) should follow these principles when extending it:
    features specific to a single agent runtime.  The frontmatter uses only fields
    from the open Agent Skills standard.
 
-6. **Leverage all five data sources.**  The unique strength of this skill is the
-   combination of source code, extensions, dependencies, community discussions,
-   and coding conversations.
-   When adding new sections, consider whether the agent should cross-reference
+6. **Leverage all data sources available in the active mode.**  The unique strength of
+   this skill is the combination of source code, extensions, dependencies, community
+   discussions, and coding conversations.  In lighter modes, some of these are accessed
+   via web APIs rather than local clones, but the agent should still cross-reference
    multiple sources — for example, a discourse search may explain *why* something
    works a certain way when the source code only shows *how*.
+
+7. **Adapt to the active mode gracefully.**  Check `.setup-stamp.json` at the start
+   of a session.  Use local tools (grep, find, git log) when data is available locally,
+   and fall back to web APIs (GitHub API, Discourse API) when it is not.  Never fail
+   simply because a directory is missing — check the mode and use the appropriate
+   strategy.
 
 ---
 
