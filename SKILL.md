@@ -30,7 +30,10 @@ When invoked the skill should ensure it has a local copy of the relevant Slicer 
 3. The **Discourse archive** – a mirror of the Slicer Discourse forum content (see
    https://github.com/pieper/slicer-discourse-archive) to allow question‑answering based on
    past community discussions.
-4. **Coding conversations** (optional) – JSONL transcripts of AI-assisted coding sessions
+4. The **NA-MIC Project Week repository** – a collection of tutorials, presentations, and code
+   from NA-MIC Project Weeks (https://github.com/NA-MIC/ProjectWeek), providing additional
+   examples and educational materials for Slicer programming.
+5. **Coding conversations** (optional) – JSONL transcripts of AI-assisted coding sessions
    captured by the [CodingChats](https://github.com/pieper/CodingChats) VS Code extension.
    These contain the full back-and-forth (prompts, tool calls, corrections, dead ends) that
    led to commits in Slicer-related repositories.  They help agents understand *how* code
@@ -42,10 +45,10 @@ Python modules, build configurations, and other snippets that help it craft accu
 precise responses to programming questions about Slicer.
 
 > 📁 Repositories are checked out into subdirectories of the skill workspace named
-> `slicer-source`, `slicer-extensions`, `slicer-discourse`, `slicer-dependencies`, and
-> `coding-chats` respectively.  You are free to override these paths by setting the
-> `SLICER_SRC_DIR`, `SLICER_EXT_DIR`, `SLICER_DISCOURSE_DIR`, `SLICER_DEP_DIR`, and
-> `CODING_CHATS_DIR` environment variables before running the setup script.
+> `slicer-source`, `slicer-extensions`, `slicer-discourse`, `slicer-dependencies`,
+> `slicer-projectweek`, and `coding-chats` respectively.  You are free to override these paths by setting the
+> `SLICER_SRC_DIR`, `SLICER_EXT_DIR`, `SLICER_DISCOURSE_DIR`, `SLICER_DEP_DIR`,
+> `SLICER_PROJECTWEEK_DIR`, and `CODING_CHATS_DIR` environment variables before running the setup script.
 
 ---
 

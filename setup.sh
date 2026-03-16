@@ -24,6 +24,7 @@ fi
 : "${SLICER_EXT_DIR:=slicer-extensions}"
 : "${SLICER_DISCOURSE_DIR:=slicer-discourse}"
 : "${SLICER_DEP_DIR:=slicer-dependencies}"
+: "${SLICER_PROJECTWEEK_DIR:=slicer-projectweek}"
 
 # optional filter: space-separated list of extension names to fetch.  Leave empty to
 # clone everything.
@@ -259,7 +260,10 @@ fi
 # 3. discourse archive
 clone_or_pull "https://github.com/pieper/slicer-discourse-archive.git" "$SLICER_DISCOURSE_DIR"
 
-# 4. coding conversations (optional)
+# 4. NA-MIC Project Week repository
+clone_or_pull "https://github.com/NA-MIC/ProjectWeek.git" "$SLICER_PROJECTWEEK_DIR"
+
+# 5. coding conversations (optional)
 # If CODING_CHATS_REPO is set explicitly, use that. Otherwise, auto-detect:
 # check if `gh` is installed, discover the current GitHub user, and see if they
 # have a CodingChats-conversations repo.

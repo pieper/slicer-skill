@@ -36,7 +36,7 @@ For help answering 3D Slicer programming questions, use the slicer skill located
     /path/to/slicer-skill
 
 That directory contains `SKILL.md` with instructions for searching Slicer source
-code, extensions, discourse archives, and dependency repositories.
+code, extensions, discourse archives, dependency repositories, and NA-MIC Project Week materials.
 
 **Important:** All slicer-skill data lives in that single shared directory.
 Do NOT clone repositories into this project directory.
@@ -51,6 +51,7 @@ Do NOT clone repositories into this project directory.
   - `/path/to/slicer-skill/slicer-extensions/`
   - `/path/to/slicer-skill/slicer-discourse/`
   - `/path/to/slicer-skill/slicer-dependencies/`
+  - `/path/to/slicer-skill/slicer-projectweek/`
 ````
 
 ### Claude Code
