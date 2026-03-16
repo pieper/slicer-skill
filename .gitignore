@@ -3,7 +3,7 @@ slicer-source
 slicer-extensions
 slicer-dependencies
 slicer-discourse
-coding-chats
+CodingChats-conversations
 
 # Setup timestamp
 .setup-stamp.json
