@@ -51,7 +51,10 @@ locally (via cloned repositories) or remotely (via web APIs):
    past community discussions.
 4. The **NA-MIC Project Week repository** – a collection of tutorials, presentations, and code
    from NA-MIC Project Weeks (https://github.com/NA-MIC/ProjectWeek), providing additional
-   examples and educational materials for Slicer programming.
+   examples and educational materials for Slicer programming. The `scripts/extract_pw_stats.py`
+   utility can be used to extract statistics about project weeks, including participant lists
+   and project counts. This is useful for finding papers, collaborations, or expertise by
+   searching for people who have attended NA-MIC Project Weeks.
 5. **Build dependencies** (VTK, ITK, CTK, etc.) – cloned from SuperBuild references.
    *(Local in full mode only.  In other modes, browse via GitHub API.)*
 6. **Coding conversations** (optional) – JSONL transcripts of AI-assisted coding sessions
