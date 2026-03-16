@@ -192,6 +192,25 @@ When repositories are available locally, search, read, and reason over them:
 > should prefer those over raw shell commands when available.  The CLI examples above are
 > provided for reference and for agents that only have shell access.
 
+### Extension documentation search (full mode)
+
+In full mode, all extension repositories are pre-cloned into `slicer-extensions/`. When
+researching a topic, **explicitly check documentation files in all extension directories**
+for additional help and examples. Many extensions contain valuable tutorials, usage examples,
+and implementation details that complement the main Slicer documentation.
+
+Look for files like:
+- `README.md` - General extension documentation and usage
+- `SKILL.md` - AI agent guidance (if present, similar to this file)
+- Documentation in `docs/`, `Documentation/`, or similar directories
+- Tutorial files, example scripts, and implementation guides
+
+- **Search extension docs**: `find slicer-extensions/ -name "*.md" -exec grep -l "<topic>" {} \;`
+- **Read extension documentation**: Check `slicer-extensions/<ExtensionName>/README.md` and
+  `slicer-extensions/<ExtensionName>/SKILL.md` (if present) for usage examples and guidance
+- **Browse extension source**: Look at `slicer-extensions/<ExtensionName>/` for code examples
+  and module implementations
+
 ### On-demand extension cloning (lightweight mode)
 
 In lightweight mode, extension source code is not pre-cloned. When you need to search
