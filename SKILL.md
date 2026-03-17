@@ -242,6 +242,7 @@ When local data is not available, use these web APIs:
 | Extensions       | local grep/find    | on-demand clone       | GitHub API / raw URLs  |
 | Dependencies     | local grep/find    | GitHub API / raw URLs | GitHub API / raw URLs  |
 | Discourse        | local grep         | Discourse search API  | Discourse search API   |
+| GitHub Issues/PRs| GitHub search API  | GitHub search API     | GitHub search API      |
 | Coding chats     | local grep         | local grep            | not available          |
 
 The goal is not merely to index, but to *reason* over the material.  For example, when
@@ -481,6 +482,40 @@ date, a human-readable slug, and the topic ID.  To search effectively:
 
 In any mode, forum threads often explain *why* things work a certain way, not
 just *how* — search the discourse when code-search alone is insufficient.
+
+### GitHub Issues and Pull Requests
+
+GitHub issues and PRs complement Discourse and source code in these situations:
+
+- **Specific error message or traceback** — issues often contain exact error text and
+  the accepted resolution.  Discourse posts frequently omit full tracebacks.
+- **"Is this a known bug?"** — search closed issues to confirm and find workarounds.
+- **"When was X added / why was Y removed?"** — PR descriptions explain the motivation
+  for API changes in a way that `git log` alone does not.
+- **Discovering undocumented pitfalls** — closed bug reports surface gotchas that never
+  make it into official docs or the Common Pitfalls section below.
+
+Use the GitHub REST API directly (no CLI dependency required):
+
+```sh
+# Search closed issues for a keyword or error message
+curl -s "https://api.github.com/search/issues?q=<keyword>+repo:Slicer/Slicer+type:issue+state:closed&per_page=10"
+
+# Search merged PRs for an API symbol or topic
+curl -s "https://api.github.com/search/issues?q=<symbol>+repo:Slicer/Slicer+type:pr+is:merged&per_page=10"
+
+# Read a specific issue or PR body
+curl -s "https://api.github.com/repos/Slicer/Slicer/issues/<number>"
+curl -s "https://api.github.com/repos/Slicer/Slicer/pulls/<number>"
+
+# Fetch comments on an issue (where the resolution often appears)
+curl -s "https://api.github.com/repos/Slicer/Slicer/issues/<number>/comments"
+```
+
+Unauthenticated requests are rate-limited to 60/hr; set a `GITHUB_TOKEN` environment
+variable to raise this to 5,000/hr.  Prefer Discourse over issues/PRs for how-to and
+workflow questions; prefer issues/PRs when debugging concrete errors or tracing API
+evolution.
 
 ---
 
