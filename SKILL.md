@@ -519,6 +519,37 @@ evolution.
 
 ---
 
+## Prefer Existing APIs Over Reimplementation
+
+Before writing custom math, geometry, image processing, or data-manipulation code,
+search for an existing implementation in the libraries Slicer already bundles.
+Reimplementing functionality that VTK, ITK, or Slicer itself already provides is a
+common source of bugs, coordinate-system errors, and maintenance burden.
+
+**Search order:**
+
+1. **`slicer.util` and MRML** — check `slicer-source/Base/Python/slicer/util.py` and
+   the script repository first.  Many common operations (resampling, array conversion,
+   node manipulation) are one-liners there.
+2. **VTK filters** — search `slicer-dependencies/VTK/Filters/` (or GitHub code search
+   for `vtk<Topic>`) before implementing geometry, mesh, image, or math operations.
+   VTK has filters for smoothing, decimation, boolean operations, distance fields,
+   coordinate transforms, interpolation, and much more.
+3. **ITK filters** — search `slicer-dependencies/ITK/Modules/` for image-processing
+   operations (registration, segmentation, morphology, statistics, etc.).  The
+   `slicer-source/Libs/vtkITK/` bridge exposes many ITK filters directly to VTK pipelines.
+4. **Slicer CLI modules** — check `slicer-source/Modules/CLI/` for ready-made
+   command-line operations (resampling, registration, model generation, etc.) that can
+   be invoked from Python via `slicer.cli.run()`.
+5. **Existing extensions** — search `slicer-extensions/` for an extension that already
+   solves the problem.  Reusing an extension's logic class is preferable to duplicating it.
+
+When in doubt, grep the source trees for the mathematical or geometric concept
+(e.g. `"principal curvature"`, `"marching cubes"`, `"Hausdorff"`) before writing any
+implementation — the answer is usually already there.
+
+---
+
 ## Common Pitfalls
 
 These are frequently encountered mistakes that are **not obvious from reading the source
