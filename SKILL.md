@@ -438,6 +438,10 @@ to follow:
 - For C++ style, browse `.cxx`/`.h` files in `Modules/Loadable/` and follow the VTK
   conventions: `vtkNew`, `vtkSmartPointer`, `SetX()`/`GetX()` accessors, and the
   `PrintSelf`/`Modified()` pattern.
+- While unicode support has improved in recent years, it may still cause various errors. Let's keep using only ASCII characters in the source code.
+- Do not require qt. If qt is available then use it (e.g., prompt the user using a popup window), but make these very useful classes available without qt as well.
+- All strings that may be displayed to the user must be internationalized (using the _() function). See https://github.com/SoniaPujolLab/SlicerLanguagePacks/blob/main/DevelopersManual.md. Text intended only for developers can remain non-translatable. Text intended for very advanced users can remain non-translatable. Application log messages should not be translated.
+
 
 ### Testing
 
