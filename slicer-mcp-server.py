@@ -183,6 +183,85 @@ def tool_screenshot(_args):
 
 
 @mcp_tool(
+    name="write_file",
+    description=(
+        "Write content to a file on the Slicer host filesystem. "
+        "For text files use utf-8 encoding (default). "
+        "For binary files, base64-encode the content and set encoding to 'base64'."
+    ),
+    inputSchema={
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Absolute file path to write",
+            },
+            "content": {
+                "type": "string",
+                "description": "File content (text or base64-encoded binary)",
+            },
+            "encoding": {
+                "type": "string",
+                "enum": ["utf-8", "base64"],
+                "description": "Content encoding (default: utf-8)",
+            },
+        },
+        "required": ["path", "content"],
+    },
+)
+def tool_write_file(args):
+    path = args["path"]
+    content = args["content"]
+    encoding = args.get("encoding", "utf-8")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    if encoding == "base64":
+        data = base64.b64decode(content)
+        with open(path, "wb") as f:
+            f.write(data)
+    else:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+    return [{"type": "text", "text": f"Wrote {os.path.getsize(path)} bytes to {path}"}]
+
+
+@mcp_tool(
+    name="read_file",
+    description=(
+        "Read a file from the Slicer host filesystem. "
+        "Returns text content for text files. "
+        "Set encoding to 'base64' to read binary files."
+    ),
+    inputSchema={
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Absolute file path to read",
+            },
+            "encoding": {
+                "type": "string",
+                "enum": ["utf-8", "base64"],
+                "description": "Content encoding (default: utf-8)",
+            },
+        },
+        "required": ["path"],
+    },
+)
+def tool_read_file(args):
+    path = args["path"]
+    encoding = args.get("encoding", "utf-8")
+    if not os.path.exists(path):
+        return [{"type": "text", "text": f"File not found: {path}"}]
+    if encoding == "base64":
+        with open(path, "rb") as f:
+            data = base64.b64encode(f.read()).decode("ascii")
+        return [{"type": "text", "text": data}]
+    else:
+        with open(path, "r", encoding="utf-8") as f:
+            return [{"type": "text", "text": f.read()}]
+
+
+@mcp_tool(
     name="load_sample_data",
     description=(
         "Load a named sample dataset into Slicer. "
@@ -309,9 +388,53 @@ class MCPRequestHandler(WebServerLib.BaseRequestHandler):
             mcpStatusMessage("MCP: client connection denied")
         return MCPRequestHandler._access_allowed
 
+    def _handleFileRequest(self, method, parsedURL, requestBody):
+        """
+        Raw HTTP file transfer at /file?path=<absolute-path>.
+
+        POST: write requestBody to file  (curl --data-binary @local.py URL)
+        GET:  read file and return contents
+        """
+        qs = urllib.parse.parse_qs(parsedURL.query)
+        paths = qs.get(b"path") or qs.get("path")
+        if not paths:
+            body = {"error": "Missing required query parameter: path"}
+            return b"application/json", json.dumps(body).encode()
+        dest = paths[0].decode() if isinstance(paths[0], bytes) else paths[0]
+
+        if method == "POST":
+            try:
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                with open(dest, "wb") as f:
+                    written = f.write(requestBody)
+                mcpFileLog(f"FILE write {written} bytes -> {dest}")
+                mcpStatusMessage(f"MCP: wrote {dest}")
+                body = {"wrote": written, "path": dest}
+            except Exception:
+                body = {"error": traceback.format_exc()}
+            return b"application/json", json.dumps(body).encode()
+
+        if method == "GET":
+            try:
+                with open(dest, "rb") as f:
+                    data = f.read()
+                mcpFileLog(f"FILE read {len(data)} bytes <- {dest}")
+                return b"application/octet-stream", data
+            except FileNotFoundError:
+                body = {"error": f"File not found: {dest}"}
+                return b"application/json", json.dumps(body).encode()
+            except Exception:
+                body = {"error": traceback.format_exc()}
+                return b"application/json", json.dumps(body).encode()
+
+        body = {"error": f"Unsupported method for /file: {method}"}
+        return b"application/json", json.dumps(body).encode()
+
     def canHandleRequest(self, uri: bytes, **_kwargs) -> float:
         parsedURL = urllib.parse.urlparse(uri)
-        return 0.5 if parsedURL.path == b"/mcp" else 0.0
+        if parsedURL.path in (b"/mcp", b"/file"):
+            return 0.5
+        return 0.0
 
     def handleRequest(
         self, method: str, uri: bytes, requestBody: bytes, **_kwargs
@@ -320,6 +443,11 @@ class MCPRequestHandler(WebServerLib.BaseRequestHandler):
         if not self._check_access():
             body = _err(None, -32600, "Access denied by user")
             return b"application/json", json.dumps(body).encode()
+
+        # ── /file endpoint — raw HTTP file transfer ──
+        parsedURL = urllib.parse.urlparse(uri)
+        if parsedURL.path == b"/file":
+            return self._handleFileRequest(method, parsedURL, requestBody)
 
         if method == "GET":
             # SSE stream endpoint — not implemented

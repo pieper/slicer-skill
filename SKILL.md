@@ -618,6 +618,47 @@ for each step of common multi-step tasks.
 
 ---
 
+## MCP Server — Interacting with a Running Slicer Instance
+
+The file `slicer-mcp-server.py` in this repository implements an MCP server that runs
+inside Slicer, exposing tools like `execute_python`, `screenshot`, `list_nodes`,
+`write_file`, and `read_file` over HTTP at `http://localhost:2026/mcp`.
+
+### File Transfer — Use the `/file` Endpoint
+
+When syncing files to or from a remote Slicer instance, **always use the raw HTTP
+`/file` endpoint** instead of passing file content through `execute_python`.  Sending
+file content via `execute_python` requires the LLM to generate the entire file as
+output tokens (at ~50–100 tokens/sec), making even small files take tens of seconds.
+The `/file` endpoint transfers bytes directly — disk to HTTP to disk — completing in
+milliseconds.
+
+**Upload a file to the Slicer host:**
+```sh
+curl -X POST "http://localhost:2026/file?path=/absolute/path/on/remote.py" \
+     --data-binary @local_file.py
+```
+
+**Download a file from the Slicer host:**
+```sh
+curl "http://localhost:2026/file?path=/absolute/path/on/remote.py" -o local_file.py
+```
+
+**Sync multiple files** by running parallel curl commands or a simple loop:
+```sh
+for f in src/*.py; do
+  curl -s -X POST "http://localhost:2026/file?path=/tmp/remote/$(basename $f)" \
+       --data-binary @"$f"
+done
+```
+
+The MCP tools `write_file` and `read_file` are also available for small,
+programmatic file operations within an LLM tool-call workflow, but the `/file`
+HTTP endpoint should be preferred for bulk transfers or any file larger than a
+few hundred bytes.
+
+---
+
 ## Extending the Skill
 
 Additional data sources can be added by editing `setup.sh` and updating this document.
