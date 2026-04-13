@@ -12,7 +12,7 @@ Usage:
      Claude Desktop / Claude Code / Cline — claude_desktop_config.json:
        {
          "mcpServers": {
-           "slicer": { "url": "http://localhost:2016/mcp" }
+           "slicer": { "url": "http://localhost:2026/mcp" }
          }
        }
 
