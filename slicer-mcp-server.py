@@ -404,6 +404,7 @@ class MCPRequestHandler(WebServerLib.BaseRequestHandler):
 
         if method == "POST":
             try:
+                import os
                 os.makedirs(os.path.dirname(dest), exist_ok=True)
                 with open(dest, "wb") as f:
                     written = f.write(requestBody)
