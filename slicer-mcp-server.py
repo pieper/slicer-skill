@@ -358,8 +358,22 @@ class MCPRequestHandler(WebServerLib.BaseRequestHandler):
     # Shared across instances — once the user decides, it sticks for the session
     _access_allowed = None  # None = not yet asked, True/False = user's choice
 
-    def __init__(self, logMessage=None):
+    def __init__(self, logMessage=None, autoAllow=False):
+        """
+        Args:
+          logMessage: optional log callback; defaults to mcpFileLog.
+          autoAllow: if True, bypass the user-confirmation dialog and
+            grant access immediately. Intended for trusted launchers
+            where a UI prompt is impractical (multi-instance
+            orchestrators, headless CI). The caller takes responsibility
+            for the security implications, since this exposes Python
+            execution and filesystem access over HTTP without user
+            confirmation.
+        """
         self.logMessage = logMessage or mcpFileLog
+        if autoAllow:
+            MCPRequestHandler._access_allowed = True
+            self.logMessage("MCP access AUTO-ALLOWED via autoAllow=True")
 
     def _check_access(self) -> bool:
         """Show a confirmation dialog on first access.  Returns True if allowed."""
@@ -502,28 +516,43 @@ class MCPRequestHandler(WebServerLib.BaseRequestHandler):
 
 # ─── Start ───────────────────────────────────────────────────
 
-# Stop any previous instance so the script can be re-pasted safely
-try:
-    mcpLogic.stop()
-except NameError:
-    pass
+def startMcpServer(port=2026, autoAllow=False, logMessage=None):
+    """Start the MCP server on the given port.
 
-MCPRequestHandler._access_allowed = None
+    Args:
+      port: TCP port to listen on (default 2026).
+      autoAllow: if True, skip the access-confirmation dialog. See
+        MCPRequestHandler.__init__ for the security caveats.
+      logMessage: optional log callback; defaults to mcpFileLog.
 
-mcpLogic = WebServer.WebServerLogic(
-    port=2026,
-    logMessage=mcpFileLog,
-    enableSlicer=False,
-    enableExec=False,
-    enableStaticPages=False,
-    enableDICOM=False,
-    enableCORS=True,
-    requestHandlers=[MCPRequestHandler(logMessage=mcpFileLog)],
-)
-mcpLogic.start()
+    Returns the WebServerLogic instance. Stop with logic.stop().
+    """
+    log = logMessage or mcpFileLog
+    # Reset access-grant state so re-running picks up the new policy.
+    MCPRequestHandler._access_allowed = None
+    logic = WebServer.WebServerLogic(
+        port=port,
+        logMessage=log,
+        enableSlicer=False,
+        enableExec=False,
+        enableStaticPages=False,
+        enableDICOM=False,
+        enableCORS=True,
+        requestHandlers=[MCPRequestHandler(logMessage=log, autoAllow=autoAllow)],
+    )
+    logic.start()
+    print(f"\n  MCP server: http://localhost:{logic.port}/mcp")
+    print(f"  Log file:   {_mcpLogFile}\n")
+    print("  Configure your MCP client with:")
+    print(f'    {{"mcpServers": {{"slicer": {{"url": "http://localhost:{logic.port}/mcp"}}}}}}')
+    print("\n  To stop: mcpLogic.stop()")
+    return logic
 
-print(f"\n  MCP server: http://localhost:{mcpLogic.port}/mcp")
-print(f"  Log file:   {_mcpLogFile}\n")
-print("  Configure your MCP client with:")
-print(f'    {{"mcpServers": {{"slicer": {{"url": "http://localhost:{mcpLogic.port}/mcp"}}}}}}')
-print("\n  To stop: mcpLogic.stop()")
+
+if __name__ == "__main__":
+    # Stop any previous instance so the script can be re-pasted safely
+    try:
+        mcpLogic.stop()
+    except NameError:
+        pass
+    mcpLogic = startMcpServer()
