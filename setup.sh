@@ -23,18 +23,34 @@ MAX_AGE_SECONDS=86400  # 24 hours
 # ─── Parse arguments ──────────────────────────────────────────
 FORCE=false
 REQUESTED_MODE=""
+REQUESTED_INDEXES=""
 while [ $# -gt 0 ]; do
     case "$1" in
-        --force) FORCE=true; shift ;;
-        --mode)  REQUESTED_MODE="$2"; shift 2 ;;
-        *)       echo "Unknown argument: $1"; exit 1 ;;
+        --force)   FORCE=true; shift ;;
+        --mode)    REQUESTED_MODE="$2"; shift 2 ;;
+        --indexes) REQUESTED_INDEXES="$2"; shift 2 ;;
+        --help|-h)
+            cat <<HELP
+Usage: ./setup.sh [--force] [--mode MODE] [--indexes LEVEL]
+
+  --mode    full | lightweight | web    (which clones to fetch)
+  --indexes none | bm25  | hybrid       (which search indexes to build)
+  --force   re-run ignoring 24h cooldown
+
+First run prompts interactively for both mode and index level.
+Subsequent runs reuse the previous choices.
+HELP
+            exit 0 ;;
+        *) echo "Unknown argument: $1 (try --help)"; exit 1 ;;
     esac
 done
 
 # ─── Read previous stamp ─────────────────────────────────────
 prev_mode=""
+prev_indexes=""
 if [ -f "$STAMP_FILE" ]; then
     prev_mode=$(perl -ne 'print $1 if /"mode"\s*:\s*"([^"]+)"/' "$STAMP_FILE" 2>/dev/null || true)
+    prev_indexes=$(perl -ne 'print $1 if /"indexes"\s*:\s*"([^"]+)"/' "$STAMP_FILE" 2>/dev/null || true)
 fi
 
 # Skip setup if the stamp file exists and is less than MAX_AGE_SECONDS old.
@@ -126,12 +142,70 @@ echo ""
 echo "Setup mode: $MODE"
 echo ""
 
+# ─── Determine search-index level ────────────────────────────
+# Three levels:
+#   none    no ranked search; agent uses grep/find/web
+#   bm25    lexical search only (~15 s setup, ~65 MB)
+#   hybrid  bm25 + dense embeddings (~15 s + ~20 min in BACKGROUND, ~300 MB)
+# Web mode forces 'none' since there are no local clones to index.
+INDEXES=""
+if [ -n "$REQUESTED_INDEXES" ]; then
+    case "$REQUESTED_INDEXES" in
+        none|bm25|hybrid) INDEXES="$REQUESTED_INDEXES" ;;
+        *) echo "Invalid --indexes: $REQUESTED_INDEXES (must be none, bm25, or hybrid)"; exit 1 ;;
+    esac
+elif [ "$MODE" = "web" ]; then
+    INDEXES="none"
+elif [ -n "$prev_indexes" ]; then
+    INDEXES="$prev_indexes"
+    echo "Re-using previous index level: $INDEXES"
+elif [ -t 0 ]; then
+    echo "╔══════════════════════════════════════════════════════════════╗"
+    echo "║              Search Index Selection                          ║"
+    echo "╠══════════════════════════════════════════════════════════════╣"
+    echo "║                                                              ║"
+    echo "║  1) none     no ranked search; agent uses grep/find/web      ║"
+    echo "║              cost: 0 setup, 0 disk                           ║"
+    echo "║                                                              ║"
+    echo "║  2) bm25     lexical only — exact keyword/identifier matches ║"
+    echo "║              cost: ~15 s, ~65 MB                             ║"
+    echo "║                                                              ║"
+    echo "║  3) hybrid   bm25 + dense embeddings (semantic + paraphrase) ║"
+    echo "║              cost: ~15 s up front, then ~20 min in the       ║"
+    echo "║                    BACKGROUND (you can keep working);        ║"
+    echo "║                    ~300 MB.  Lexical search is ready         ║"
+    echo "║                    immediately; vector search becomes        ║"
+    echo "║                    available when the background job ends.   ║"
+    echo "║                                                              ║"
+    echo "╚══════════════════════════════════════════════════════════════╝"
+    echo ""
+    printf "  Select index level [1/2/3]: "
+    read -r choice
+    case "${choice}" in
+        1|none)   INDEXES="none" ;;
+        2|bm25)   INDEXES="bm25" ;;
+        3|hybrid) INDEXES="hybrid" ;;
+        *) echo "Invalid choice, defaulting to bm25."; INDEXES="bm25" ;;
+    esac
+else
+    echo "  Non-interactive: defaulting to indexes=bm25."
+    echo "  Use --indexes none|bm25|hybrid to override."
+    INDEXES="bm25"
+fi
+echo "Index level: $INDEXES"
+echo ""
+
+# Tiny helper: write the stamp with both fields
+write_stamp() {
+    printf '{"epoch": %d, "iso": "%s", "mode": "%s", "indexes": "%s"}\n' \
+        "$(date +%s)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$MODE" "$INDEXES" > "$STAMP_FILE"
+}
+
 # ─── Web mode: no cloning needed ─────────────────────────────
 if [ "$MODE" = "web" ]; then
     echo "Web-only mode — no repositories will be cloned."
     echo "The agent will use GitHub API and Discourse API for all searches."
-    printf '{"epoch": %d, "iso": "%s", "mode": "%s"}\n' \
-        "$(date +%s)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$MODE" > "$STAMP_FILE"
+    write_stamp
     echo ""
     echo "Setup complete (web mode)."
     exit 0
@@ -402,17 +476,28 @@ if [ -n "${CODING_CHATS_REPO:-}" ]; then
 fi
 
 # ─── 4. Search indexes + MCP server ──────────────────────────
-# Builds a hybrid (BM25 + dense) search index over the cloned corpora and
-# registers a stdio MCP server (slicer-skill-search) so an agent can do
-# ranked retrieval instead of raw grep.  All paths are resolved
-# automatically; users do not need to edit anything by hand.
+# Builds a search index over the cloned corpora and registers a stdio MCP
+# server (slicer-skill-search) so an agent can do ranked retrieval instead
+# of raw grep.  All paths are resolved automatically; users do not need to
+# edit anything by hand.
+#
+# Argument: level ∈ { bm25, hybrid }
+#   bm25    — BM25 only.  Fast (~15 s, ~65 MB).  Built synchronously.
+#   hybrid  — BM25 (synchronous, ~15 s) AND dense embeddings (BACKGROUND,
+#             ~20 min, ~300 MB).  Lexical search is usable as soon as
+#             setup.sh exits; vector search becomes available when the
+#             background build completes.  Progress: tail .vector-build.log
+#             or call the MCP `index_status` tool.
 setup_search_indexes() {
+    local level="$1"
     local venv_dir="$SCRIPT_DIR/.venv"
     local req_file="$SCRIPT_DIR/scripts/requirements.txt"
     local bm25_builder="$SCRIPT_DIR/scripts/build_bm25.py"
     local vec_builder="$SCRIPT_DIR/scripts/build_vector.py"
     local mcp_script="$SCRIPT_DIR/slicer-skill-search-mcp.py"
     local mcp_config="$SCRIPT_DIR/.mcp.json"
+    local vec_log="$SCRIPT_DIR/.vector-build.log"
+    local vec_pid="$SCRIPT_DIR/.vector-build.pid"
 
     if ! command -v python3 >/dev/null 2>&1; then
         echo "  python3 not found — skipping search setup."
@@ -426,7 +511,7 @@ setup_search_indexes() {
     fi
 
     echo ""
-    echo "Setting up search indexes..."
+    echo "Setting up search indexes (level: $level)..."
 
     # Create venv if missing
     if [ ! -x "$venv_dir/bin/python" ]; then
@@ -449,7 +534,7 @@ setup_search_indexes() {
         return 0
     fi
 
-    # 4a) BM25 (lexical) — fast, runs in seconds
+    # 4a) BM25 (lexical) — fast, runs in seconds, always built
     "$venv_dir/bin/python" "$bm25_builder" \
         --source-dir "$SCRIPT_DIR/$SLICER_SRC_DIR" \
         --discourse-dir "$SCRIPT_DIR/$SLICER_DISCOURSE_DIR" \
@@ -457,38 +542,77 @@ setup_search_indexes() {
         echo "  BM25 build failed — lexical search will be unavailable."
     }
 
-    # 4b) Vector (dense) — slower (downloads ~30 MB model on first run, then
-    #     embeds chunks on CPU). Failure is non-fatal: hybrid search degrades
-    #     to lexical-only if the vector index is missing.
-    if [ -f "$vec_builder" ]; then
+    # 4b) Vector (dense) — only if user asked for hybrid.  Built in the
+    #     BACKGROUND so the user/agent can keep working.  Old PID file
+    #     cleared on entry; new PID written for index_status to discover.
+    if [ "$level" = "hybrid" ] && [ -f "$vec_builder" ]; then
+        # If a previous vector build is still running, don't start another
+        if [ -f "$vec_pid" ]; then
+            local old_pid
+            old_pid=$(cat "$vec_pid" 2>/dev/null || true)
+            if [ -n "$old_pid" ] && kill -0 "$old_pid" 2>/dev/null; then
+                echo "  Vector build already running (PID $old_pid).  Skipping launch."
+                echo "    Tail progress: tail -f .vector-build.log"
+                return 0
+            fi
+        fi
         echo ""
-        echo "  Building dense (vector) index. This may take several minutes"
-        echo "  on first run while the embedding model downloads + embeds."
-        "$venv_dir/bin/python" "$vec_builder" \
+        echo "  Launching vector index build in BACKGROUND..."
+        # nohup + & + disown: child survives after setup.sh exits, log captured
+        nohup "$venv_dir/bin/python" -u "$vec_builder" \
             --source-dir "$SCRIPT_DIR/$SLICER_SRC_DIR" \
             --discourse-dir "$SCRIPT_DIR/$SLICER_DISCOURSE_DIR" \
-            --out "$SCRIPT_DIR/.vector-index" || {
-            echo "  Vector index build failed — search falls back to lexical-only."
-        }
+            --out "$SCRIPT_DIR/.vector-index" \
+            > "$vec_log" 2>&1 &
+        local build_pid=$!
+        echo "$build_pid" > "$vec_pid"
+        disown "$build_pid" 2>/dev/null || true
+        echo "    PID:    $build_pid"
+        echo "    Log:    tail -f .vector-build.log"
+        echo "    ETA:    ~20 min on a recent Mac/Linux"
+        echo "    Status: call the MCP 'index_status' tool — it reports 'building'"
+        echo "            with the latest log line until the vector index is ready."
+        echo ""
+        echo "  Lexical (BM25) search is available immediately."
+        echo "  Vector / hybrid search becomes available when the build completes."
     fi
 
-    # Write .mcp.json — setup.sh is the source of truth.  The file is
-    # gitignored because the search-server entry needs absolute paths that
-    # vary per machine.  We register two servers:
-    #
-    #   slicer              — HTTP endpoint exposed by the in-Slicer
-    #                         WebServer module (slicer-mcp-server.py running
-    #                         inside Slicer).  Static URL, no machine paths.
-    #
-    #   slicer-skill-search — stdio search server in this directory; needs
-    #                         the absolute paths to the venv python and
-    #                         this directory's launcher script.
-    #
-    # Any other entries the user has added are preserved.
+    # The .mcp.json writer is its own step (write_mcp_config below) so it
+    # can also run when indexes=none — keeping the slicer http entry intact.
+    write_mcp_config "$level"
+}
+
+# Maintain .mcp.json idempotently.  setup.sh owns this file; .mcp.json is
+# gitignored because absolute paths in the search-server entry vary per
+# machine.  We register:
+#
+#   slicer              — HTTP endpoint exposed by the in-Slicer WebServer
+#                         module (slicer-mcp-server.py).  Static URL.
+#
+#   slicer-skill-search — stdio search server in this directory; only
+#                         registered when level != none.  Removed if level
+#                         was previously bm25/hybrid and is now none.
+#
+# Any user-added entries are preserved.
+write_mcp_config() {
+    local level="$1"
+    local venv_dir="$SCRIPT_DIR/.venv"
+    local mcp_config="$SCRIPT_DIR/.mcp.json"
+    # Prefer the venv python if it exists; fall back to system python3.
+    local py_for_writer
+    if [ -x "$venv_dir/bin/python" ]; then
+        py_for_writer="$venv_dir/bin/python"
+    elif command -v python3 >/dev/null 2>&1; then
+        py_for_writer="python3"
+    else
+        echo "  python3 not available — skipping .mcp.json update."
+        return 0
+    fi
     SKILL_PY="$venv_dir/bin/python" \
-    SKILL_SCRIPT="$mcp_script" \
+    SKILL_SCRIPT="$SCRIPT_DIR/slicer-skill-search-mcp.py" \
     SKILL_MCP="$mcp_config" \
-    "$venv_dir/bin/python" - <<'PY'
+    SKILL_INCLUDE_SEARCH="$([ "$level" != "none" ] && echo yes || echo no)" \
+    "$py_for_writer" - <<'PY'
 import json
 import os
 from pathlib import Path
@@ -506,27 +630,34 @@ servers.setdefault("slicer", {
     "type": "http",
     "url": "http://localhost:2026/mcp",
 })
-# Always (re)write the search entry — paths can move between machines
-servers["slicer-skill-search"] = {
-    "type": "stdio",
-    "command": os.environ["SKILL_PY"],
-    "args": [os.environ["SKILL_SCRIPT"]],
-}
+# Search entry — present iff search indexes are enabled
+if os.environ["SKILL_INCLUDE_SEARCH"] == "yes":
+    servers["slicer-skill-search"] = {
+        "type": "stdio",
+        "command": os.environ["SKILL_PY"],
+        "args": [os.environ["SKILL_SCRIPT"]],
+    }
+else:
+    servers.pop("slicer-skill-search", None)
 mcp_path.write_text(json.dumps(config, indent=2) + "\n")
-print(f"  Wrote {mcp_path} (slicer + slicer-skill-search)")
+which = "slicer + slicer-skill-search" if os.environ["SKILL_INCLUDE_SEARCH"] == "yes" else "slicer only (search disabled)"
+print(f"  Wrote {mcp_path} ({which})")
 PY
 }
 
-if [ "$MODE" != "web" ]; then
-    setup_search_indexes
+if [ "$INDEXES" != "none" ]; then
+    setup_search_indexes "$INDEXES"
+else
+    # Still maintain .mcp.json so the slicer http entry stays in sync
+    # (and any prior search entry is removed cleanly).
+    write_mcp_config "none"
 fi
 
 # ─── Write stamp ─────────────────────────────────────────────
-printf '{"epoch": %d, "iso": "%s", "mode": "%s"}\n' \
-    "$(date +%s)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$MODE" > "$STAMP_FILE"
+write_stamp
 
 echo ""
-echo "Setup complete (mode: $MODE)."
+echo "Setup complete (mode: $MODE, indexes: $INDEXES)."
 
 # ─── Rebase/Update Notes ─────────────────────────────────────
 # This script uses git pull --ff-only for updates, which performs fast-forward

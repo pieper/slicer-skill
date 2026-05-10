@@ -18,6 +18,10 @@ coding-chats
 .bm25-index/
 .vector-index/
 
+# Background vector-build artifacts (PID + log, written by setup.sh)
+.vector-build.log
+.vector-build.pid
+
 # Editor temp/swap files
 *~
 *.swp

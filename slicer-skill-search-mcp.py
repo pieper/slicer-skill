@@ -205,13 +205,51 @@ def search_discourse(
     return _run_search("discourse", query, top_k, mode, lexical_weight, vector_weight)
 
 
+def _vector_build_status() -> dict | None:
+    """If setup.sh kicked off a background vector build, report its state.
+
+    Looks for the PID file written by setup.sh, checks whether the process
+    is still alive, and tails the build log so the agent (or user) can see
+    progress without leaving the chat.
+    """
+    pid_file = WORKSPACE / ".vector-build.pid"
+    log_file = WORKSPACE / ".vector-build.log"
+    if not pid_file.exists():
+        return None
+    try:
+        pid = int(pid_file.read_text().strip())
+    except (OSError, ValueError):
+        return None
+    try:
+        os.kill(pid, 0)
+        alive = True
+    except OSError:
+        alive = False
+    log_tail: list[str] = []
+    if log_file.exists():
+        try:
+            log_tail = log_file.read_text().splitlines()[-3:]
+        except OSError:
+            pass
+    return {"pid": pid, "alive": alive, "log_tail": log_tail}
+
+
 @mcp.tool(description=(
     "List the available BM25 and vector indexes and their freshness. Use "
     "this to check whether the local indexes have been built and when, "
-    "before calling search_source or search_discourse."
+    "before calling search_source or search_discourse. If a vector index "
+    "build was kicked off in the background by setup.sh, this also reports "
+    "the build's PID, whether the process is still alive, and the last few "
+    "lines of the build log."
 ))
 def index_status() -> str:
-    """Report which indexes are built, with manifest metadata for each."""
+    """Report which indexes are built, with manifest metadata for each.
+
+    Also detects an in-progress background vector build (started by setup.sh
+    with --indexes hybrid) and surfaces its PID + log tail so the caller
+    knows whether vector search is "not built yet" vs "building right now,
+    almost ready".
+    """
     out = []
     for corpus_key, c in CORPORA.items():
         for kind in ("bm25", "vector"):
@@ -224,12 +262,32 @@ def index_status() -> str:
                     manifest = {"error": str(e)}
                 out.append({"corpus": corpus_key, "kind": kind, "built": True, **manifest})
             else:
-                out.append({
+                entry = {
                     "corpus": corpus_key,
                     "kind": kind,
                     "built": False,
                     "hint": "Run ./setup.sh --force to build all indexes",
-                })
+                }
+                # Vector indexes specifically may be mid-build by a background job
+                if kind == "vector":
+                    bs = _vector_build_status()
+                    if bs is not None:
+                        entry["building"] = bs["alive"]
+                        entry["build_pid"] = bs["pid"]
+                        entry["log_tail"] = bs["log_tail"]
+                        if bs["alive"]:
+                            entry["hint"] = (
+                                "Background vector build in progress — "
+                                "use lexical search now; vector/hybrid will "
+                                "become available when the build completes."
+                            )
+                        else:
+                            entry["hint"] = (
+                                "Background vector build process is no longer "
+                                "running but the index isn't on disk — check "
+                                ".vector-build.log for errors."
+                            )
+                out.append(entry)
     return json.dumps(out, indent=2)
 
 

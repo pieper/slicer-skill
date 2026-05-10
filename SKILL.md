@@ -20,9 +20,16 @@ understands the SKILLS.md convention (e.g. Claude Code, OpenAI agents, etc.).
 
 ## Setup Modes
 
-The setup script (`./setup.sh`) supports three modes, balancing disk usage against
-query speed.  On first run it prompts the user to choose; subsequent runs reuse the
-previous choice.  The mode is recorded in `.setup-stamp.json` (the `"mode"` field).
+The setup script (`./setup.sh`) has two orthogonal axes:
+
+1. **mode** — *what gets cloned* (full / lightweight / web)
+2. **indexes** — *what ranked-search indexes get built* (none / bm25 / hybrid)
+
+On first run, `setup.sh` prompts for both. Subsequent runs reuse the previous
+choices, recorded in `.setup-stamp.json` as the `"mode"` and `"indexes"` fields.
+You can override interactively or via flags.
+
+### Mode (which clones)
 
 | Mode          | Disk    | Setup time | What's local                                         |
 | ------------- | ------- | ---------- | ---------------------------------------------------- |
@@ -30,11 +37,27 @@ previous choice.  The mode is recorded in `.setup-stamp.json` (the `"mode"` fiel
 | **lightweight**| ~1 GB  | ~2 min     | Source + ExtensionsIndex metadata (JSON only)         |
 | **web**       | minimal | instant    | Nothing cloned — all access via web APIs              |
 
-You can override interactively or via `./setup.sh --mode full|lightweight|web`.
+Override: `./setup.sh --mode full|lightweight|web`
 
-**Determining the active mode:** Read `.setup-stamp.json` in the skill workspace.
-The `"mode"` field will be `"full"`, `"lightweight"`, or `"web"`.  If the file does
-not exist, setup has not been run yet — run `./setup.sh` first.
+### Indexes (which ranked-search backends)
+
+| Indexes  | Disk    | Setup time                                  | What it gives you                                        |
+| -------- | ------- | ------------------------------------------- | -------------------------------------------------------- |
+| **none** | 0       | instant                                     | No ranked search; the agent uses grep/find/web APIs.     |
+| **bm25** | ~65 MB  | ~15 s (foreground)                          | Lexical search (BM25) over slicer-source + slicer-discourse. Best for exact identifiers, symbols, paths. |
+| **hybrid**| ~300 MB| ~15 s up front, ~20 min in the **background** | bm25 PLUS dense embeddings (sentence-transformers/all-MiniLM-L6-v2). Adds semantic / paraphrase search. Lexical search is ready as soon as setup.sh exits; vector/hybrid search becomes available when the background build finishes. |
+
+Override: `./setup.sh --indexes none|bm25|hybrid`
+
+**Background build progress** for the hybrid level:
+- `tail -f .vector-build.log` from the workspace root, or
+- call the MCP `index_status` tool — it reports `"building": true` with the
+  process PID and the last log lines while the embed job is running.
+
+`web` mode forces `indexes=none` (there are no local clones to index).
+
+**Determining the active state:** Read `.setup-stamp.json` in the skill workspace
+and look at `"mode"` and `"indexes"`. If the file does not exist, run `./setup.sh`.
 
 ## Goal
 
