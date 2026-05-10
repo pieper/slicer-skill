@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "slicer": {
-      "type": "http",
-      "url": "http://localhost:2026/mcp"
-    }
-  }
-}

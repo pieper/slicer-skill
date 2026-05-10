@@ -167,17 +167,55 @@ and looking at the `"mode"` field.  This determines which search strategies are 
 > Match the suggestion to what's actually bottlenecking — if only Discourse searches
 > are slow, suggest full mode; if code search is slow, lightweight may suffice.
 
-### Local search strategies (full and lightweight modes)
+### Ranked search via the slicer-skill-search MCP server (preferred)
+
+`setup.sh` builds two complementary indexes over `slicer-source/` and
+`slicer-discourse/` and registers a stdio MCP server (`slicer-skill-search`)
+that exposes ranked retrieval. **Prefer these tools over `grep`/`git grep`
+for natural-language and exploratory queries** — they return ranked results
+with snippets instead of an unranked dump of every match.
+
+Two tools are exposed:
+
+- `search_source(query, top_k=10, mode="auto", lexical_weight=1.0, vector_weight=1.0)`
+- `search_discourse(query, top_k=10, mode="auto", lexical_weight=1.0, vector_weight=1.0)`
+
+Plus `index_status()` to check index freshness.
+
+**Pick `mode` by the *shape* of your query:**
+
+| mode | What it does | Best for |
+|---|---|---|
+| `lexical` | BM25 over tokenized text | Concrete identifiers, symbols, paths, error strings, rare keywords (e.g. `vtkMRMLScalarVolumeNode`, `arrayFromVolume`, `CMAKE_PREFIX_PATH`) |
+| `vector` | Dense embeddings (sentence-transformers/all-MiniLM-L6-v2) | Conceptual / paraphrased queries where the answer probably uses different words than the question (e.g. "how do I draw a bounding box around the lesion", "why does my volume look flipped after export") |
+| `hybrid` | Reciprocal Rank Fusion of both | The safe default when you don't know which side will fire — combines exact-match precision with semantic recall |
+| `auto` | Pick `hybrid` if both indexes exist, else fall back | Default. Good for almost everything. |
+
+**On-the-fly weighting in hybrid mode.** When you have a sense of which signal
+should matter more for a particular query, set `lexical_weight` and
+`vector_weight` (defaults 1.0 each). Examples:
+
+- A query containing a precise symbol *plus* prose ("how does
+  `vtkMRMLScalarVolumeNode::GetImageData` interact with image observers"):
+  `mode="hybrid", lexical_weight=2.0, vector_weight=1.0`.
+- A purely conceptual query with no special keywords ("converting tumor
+  volume to a printable mesh"): `mode="hybrid", lexical_weight=0.5,
+  vector_weight=1.5`, or just `mode="vector"`.
+
+**Result shape.** Each hit is `{path, abs_path, score, line, snippet}`. Use
+the standard Read tool with `abs_path` to fetch full files, optionally with
+`offset=line` for a targeted read.
+
+**Fallback.** If `index_status()` shows an index is missing or stale, or you
+need to search a corpus the MCP doesn't index (extensions, dependencies,
+project week, coding chats), fall through to raw shell tools below.
+
+### Raw shell search (extensions, dependencies, on-demand corpora)
 
 When repositories are available locally, search, read, and reason over them:
 
-- **Search for code symbols** across `slicer-source`, extension subdirectories, or
-  `slicer-dependencies`.
-  CLI example: `git -C slicer-source grep -rn "vtkSmartPointer"`.
-- **Find files by name or pattern** — locate headers, Python modules, CMake configs, etc.
-  CLI example: `find slicer-source -name "*Logic.h"`.
-- **Query the discourse archive** (full mode) for community discussions about a topic.
-  CLI example: `grep -rn "SegmentEditor" slicer-discourse`.
+- **Search extension code** (full mode) under `slicer-extensions/<Name>/`.
+  CLI example: `find slicer-extensions/ -name "*.md" -exec grep -l "<topic>" {} \;`.
 - **Inspect build dependencies** (full mode) in `slicer-dependencies` when reasoning about
   build-time behavior, API versions, or exact tags used by the SuperBuild.
   CLI example: `git -C slicer-dependencies/VTK grep -rn "vtkNew"`.
@@ -187,6 +225,8 @@ When repositories are available locally, search, read, and reason over them:
   CLI example: `grep -rn "SegmentEditor" CodingChats-conversations/sessions/`.
 - **Understand project structure** by reading CMakeLists, Python `__init__.py` files, and
   other configuration files in the clones.
+- **Code symbols / file-name lookups** in slicer-source itself can also use raw
+  `git grep` / `find` if you prefer them over the ranked MCP search.
 
 > Agents with higher-level file search and content search tools (e.g. Glob, Grep, Read)
 > should prefer those over raw shell commands when available.  The CLI examples above are

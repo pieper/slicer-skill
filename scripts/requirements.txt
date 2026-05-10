@@ -1,0 +1,3 @@
+bm25s>=0.3
+mcp>=1.0
+fastembed>=0.4

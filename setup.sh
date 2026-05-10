@@ -401,6 +401,126 @@ if [ -n "${CODING_CHATS_REPO:-}" ]; then
     clone_or_pull "$CODING_CHATS_REPO" "$CODING_CHATS_DIR"
 fi
 
+# ─── 4. Search indexes + MCP server ──────────────────────────
+# Builds a hybrid (BM25 + dense) search index over the cloned corpora and
+# registers a stdio MCP server (slicer-skill-search) so an agent can do
+# ranked retrieval instead of raw grep.  All paths are resolved
+# automatically; users do not need to edit anything by hand.
+setup_search_indexes() {
+    local venv_dir="$SCRIPT_DIR/.venv"
+    local req_file="$SCRIPT_DIR/scripts/requirements.txt"
+    local bm25_builder="$SCRIPT_DIR/scripts/build_bm25.py"
+    local vec_builder="$SCRIPT_DIR/scripts/build_vector.py"
+    local mcp_script="$SCRIPT_DIR/slicer-skill-search-mcp.py"
+    local mcp_config="$SCRIPT_DIR/.mcp.json"
+
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "  python3 not found — skipping search setup."
+        echo "  Install Python 3.10+ to enable ranked retrieval."
+        return 0
+    fi
+
+    if [ ! -f "$req_file" ] || [ ! -f "$bm25_builder" ] || [ ! -f "$mcp_script" ]; then
+        echo "  Search setup files missing — skipping."
+        return 0
+    fi
+
+    echo ""
+    echo "Setting up search indexes..."
+
+    # Create venv if missing
+    if [ ! -x "$venv_dir/bin/python" ]; then
+        echo "  Creating venv at $venv_dir"
+        python3 -m venv "$venv_dir" || {
+            echo "  Failed to create venv — skipping search setup."
+            return 0
+        }
+    fi
+
+    # Install/upgrade dependencies (idempotent — quiet if already current)
+    "$venv_dir/bin/pip" install --quiet --upgrade pip >/dev/null 2>&1 || true
+    if ! "$venv_dir/bin/pip" install --quiet -r "$req_file"; then
+        echo "  pip install failed — skipping search setup."
+        return 0
+    fi
+
+    if [ ! -d "$SCRIPT_DIR/$SLICER_SRC_DIR" ] && [ ! -d "$SCRIPT_DIR/$SLICER_DISCOURSE_DIR" ]; then
+        echo "  No local source/discourse clones found — index build skipped."
+        return 0
+    fi
+
+    # 4a) BM25 (lexical) — fast, runs in seconds
+    "$venv_dir/bin/python" "$bm25_builder" \
+        --source-dir "$SCRIPT_DIR/$SLICER_SRC_DIR" \
+        --discourse-dir "$SCRIPT_DIR/$SLICER_DISCOURSE_DIR" \
+        --out "$SCRIPT_DIR/.bm25-index" || {
+        echo "  BM25 build failed — lexical search will be unavailable."
+    }
+
+    # 4b) Vector (dense) — slower (downloads ~30 MB model on first run, then
+    #     embeds chunks on CPU). Failure is non-fatal: hybrid search degrades
+    #     to lexical-only if the vector index is missing.
+    if [ -f "$vec_builder" ]; then
+        echo ""
+        echo "  Building dense (vector) index. This may take several minutes"
+        echo "  on first run while the embedding model downloads + embeds."
+        "$venv_dir/bin/python" "$vec_builder" \
+            --source-dir "$SCRIPT_DIR/$SLICER_SRC_DIR" \
+            --discourse-dir "$SCRIPT_DIR/$SLICER_DISCOURSE_DIR" \
+            --out "$SCRIPT_DIR/.vector-index" || {
+            echo "  Vector index build failed — search falls back to lexical-only."
+        }
+    fi
+
+    # Write .mcp.json — setup.sh is the source of truth.  The file is
+    # gitignored because the search-server entry needs absolute paths that
+    # vary per machine.  We register two servers:
+    #
+    #   slicer              — HTTP endpoint exposed by the in-Slicer
+    #                         WebServer module (slicer-mcp-server.py running
+    #                         inside Slicer).  Static URL, no machine paths.
+    #
+    #   slicer-skill-search — stdio search server in this directory; needs
+    #                         the absolute paths to the venv python and
+    #                         this directory's launcher script.
+    #
+    # Any other entries the user has added are preserved.
+    SKILL_PY="$venv_dir/bin/python" \
+    SKILL_SCRIPT="$mcp_script" \
+    SKILL_MCP="$mcp_config" \
+    "$venv_dir/bin/python" - <<'PY'
+import json
+import os
+from pathlib import Path
+
+mcp_path = Path(os.environ["SKILL_MCP"])
+config = {"mcpServers": {}}
+if mcp_path.exists():
+    try:
+        config = json.loads(mcp_path.read_text())
+    except json.JSONDecodeError:
+        pass
+servers = config.setdefault("mcpServers", {})
+# Static entry — only add if the user hasn't already configured it
+servers.setdefault("slicer", {
+    "type": "http",
+    "url": "http://localhost:2026/mcp",
+})
+# Always (re)write the search entry — paths can move between machines
+servers["slicer-skill-search"] = {
+    "type": "stdio",
+    "command": os.environ["SKILL_PY"],
+    "args": [os.environ["SKILL_SCRIPT"]],
+}
+mcp_path.write_text(json.dumps(config, indent=2) + "\n")
+print(f"  Wrote {mcp_path} (slicer + slicer-skill-search)")
+PY
+}
+
+if [ "$MODE" != "web" ]; then
+    setup_search_indexes
+fi
+
 # ─── Write stamp ─────────────────────────────────────────────
 printf '{"epoch": %d, "iso": "%s", "mode": "%s"}\n' \
     "$(date +%s)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$MODE" > "$STAMP_FILE"
