@@ -459,6 +459,11 @@ if [ "$MODE" = "full" ] && [ -d "$SLICER_EXT_DIR" ]; then
     rm -f "$tmpfile"
 fi
 
+# ─── 3. Discourse archive (full mode only) ───────────────────
+if [ "$MODE" = "full" ]; then
+    clone_or_pull "https://github.com/pieper/slicer-discourse-archive.git" "$SLICER_DISCOURSE_DIR"
+fi
+
 # ─── 3. Coding conversations (optional, full and lightweight) ─
 : "${CODING_CHATS_DIR:=CodingChats-conversations}"
 if [ -z "${CODING_CHATS_REPO:-}" ] && command -v gh >/dev/null 2>&1; then
