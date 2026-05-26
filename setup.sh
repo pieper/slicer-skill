@@ -539,11 +539,28 @@ setup_search_indexes() {
         return 0
     fi
 
+    # Extra Slicer-specific dependency corpora — only indexed in full mode,
+    # since lightweight skips slicer-dependencies/. Kept tight: CTK, vtkAddon,
+    # SlicerExecutionModel. VTK/ITK/DCMTK are intentionally excluded — they're
+    # huge and their generic API would swamp Slicer-specific results.
+    local -a extra_args=()
+    if [ "$MODE" = "full" ]; then
+        for dep in CTK vtkAddon SlicerExecutionModel; do
+            dep_path="$SCRIPT_DIR/$SLICER_DEP_DIR/$dep"
+            if [ -d "$dep_path" ]; then
+                # Lowercase index name so the MCP tool is search_ctk, etc.
+                lname=$(echo "$dep" | tr '[:upper:]' '[:lower:]')
+                extra_args+=(--extra "$lname=$dep_path")
+            fi
+        done
+    fi
+
     # 4a) BM25 (lexical) — fast, runs in seconds, always built
     "$venv_dir/bin/python" "$bm25_builder" \
         --source-dir "$SCRIPT_DIR/$SLICER_SRC_DIR" \
         --discourse-dir "$SCRIPT_DIR/$SLICER_DISCOURSE_DIR" \
-        --out "$SCRIPT_DIR/.bm25-index" || {
+        --out "$SCRIPT_DIR/.bm25-index" \
+        "${extra_args[@]}" || {
         echo "  BM25 build failed — lexical search will be unavailable."
     }
 
@@ -568,6 +585,7 @@ setup_search_indexes() {
             --source-dir "$SCRIPT_DIR/$SLICER_SRC_DIR" \
             --discourse-dir "$SCRIPT_DIR/$SLICER_DISCOURSE_DIR" \
             --out "$SCRIPT_DIR/.vector-index" \
+            "${extra_args[@]}" \
             > "$vec_log" 2>&1 &
         local build_pid=$!
         echo "$build_pid" > "$vec_pid"

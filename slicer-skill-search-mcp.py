@@ -45,22 +45,37 @@ from mcp.server.fastmcp import FastMCP  # noqa: E402
 BM25_ROOT = WORKSPACE / ".bm25-index"
 VECTOR_ROOT = WORKSPACE / ".vector-index"
 
-CORPORA = {
-    "source": {
-        "doc_root": WORKSPACE / "slicer-source",
-        "bm25": BM25Index(name="source", index_dir=BM25_ROOT / "source",
-                          doc_root=WORKSPACE / "slicer-source"),
-        "vector": VectorIndex(name="source", index_dir=VECTOR_ROOT / "source",
-                              doc_root=WORKSPACE / "slicer-source"),
-    },
-    "discourse": {
-        "doc_root": WORKSPACE / "slicer-discourse",
-        "bm25": BM25Index(name="discourse", index_dir=BM25_ROOT / "discourse",
-                          doc_root=WORKSPACE / "slicer-discourse"),
-        "vector": VectorIndex(name="discourse", index_dir=VECTOR_ROOT / "discourse",
-                              doc_root=WORKSPACE / "slicer-discourse"),
-    },
-}
+# Static registry of every corpus this server knows about. doc_root is where
+# the files live on disk; label feeds the tool description so the agent can
+# route queries. Per-corpus tools are registered below for every entry whose
+# doc_root exists (so lightweight installs don't see dead "not built" tools).
+_DEPS = WORKSPACE / "slicer-dependencies"
+CORPUS_REGISTRY = [
+    ("source", WORKSPACE / "slicer-source",
+     "the local Slicer source tree (slicer-source/) — C++ headers/sources, "
+     "Python modules, CMake, and developer docs"),
+    ("discourse", WORKSPACE / "slicer-discourse",
+     "the local Slicer Discourse archive (slicer-discourse/) — "
+     "~18,700 community forum threads as rendered Markdown"),
+    ("ctk", _DEPS / "CTK",
+     "the CTK (Common Toolkit) source — Qt widgets, DICOM utilities, and "
+     "core abstractions used throughout Slicer's UI layer"),
+    ("vtkaddon", _DEPS / "vtkAddon",
+     "Slicer's vtkAddon library — VTK extensions shipped with Slicer "
+     "(markups helpers, volume rendering utilities, etc.)"),
+    ("slicerexecutionmodel", _DEPS / "SlicerExecutionModel",
+     "SlicerExecutionModel — the framework for Slicer command-line modules "
+     "(GenerateCLP, parameter XML descriptions, CLI plumbing)"),
+]
+
+CORPORA: dict[str, dict] = {}
+for _name, _root, _label in CORPUS_REGISTRY:
+    CORPORA[_name] = {
+        "doc_root": _root,
+        "label": _label,
+        "bm25": BM25Index(name=_name, index_dir=BM25_ROOT / _name, doc_root=_root),
+        "vector": VectorIndex(name=_name, index_dir=VECTOR_ROOT / _name, doc_root=_root),
+    }
 
 VALID_MODES = ("lexical", "vector", "hybrid")
 
@@ -177,32 +192,31 @@ standard Read tool with abs_path to fetch full files.
 mcp = FastMCP("slicer-skill-search")
 
 
-@mcp.tool(description=SEARCH_DESCRIPTION_TEMPLATE.format(
-    corpus_label=("the local Slicer source tree (slicer-source/) — C++ "
-                  "headers/sources, Python modules, CMake, and developer docs")))
-def search_source(
-    query: str,
-    top_k: int = 10,
-    mode: str = "auto",
-    lexical_weight: float = 1.0,
-    vector_weight: float = 1.0,
-) -> str:
-    """Search slicer-source by relevance."""
-    return _run_search("source", query, top_k, mode, lexical_weight, vector_weight)
+def _make_search_tool(corpus_key: str, label: str):
+    """Register one search_<corpus> tool. Each captures corpus_key in its closure."""
+
+    def search(
+        query: str,
+        top_k: int = 10,
+        mode: str = "auto",
+        lexical_weight: float = 1.0,
+        vector_weight: float = 1.0,
+    ) -> str:
+        return _run_search(corpus_key, query, top_k, mode, lexical_weight, vector_weight)
+
+    search.__name__ = f"search_{corpus_key}"
+    search.__doc__ = f"Search {corpus_key} by relevance."
+    mcp.tool(
+        name=f"search_{corpus_key}",
+        description=SEARCH_DESCRIPTION_TEMPLATE.format(corpus_label=label),
+    )(search)
 
 
-@mcp.tool(description=SEARCH_DESCRIPTION_TEMPLATE.format(
-    corpus_label=("the local Slicer Discourse archive (slicer-discourse/) — "
-                  "~18,700 community forum threads as rendered Markdown")))
-def search_discourse(
-    query: str,
-    top_k: int = 10,
-    mode: str = "auto",
-    lexical_weight: float = 1.0,
-    vector_weight: float = 1.0,
-) -> str:
-    """Search slicer-discourse by relevance."""
-    return _run_search("discourse", query, top_k, mode, lexical_weight, vector_weight)
+# Register tools only for corpora whose doc_root actually exists, so lightweight
+# installs (no slicer-dependencies/) don't see dead tools for unbuilt indexes.
+for _name, _meta in CORPORA.items():
+    if _meta["doc_root"].exists():
+        _make_search_tool(_name, _meta["label"])
 
 
 def _vector_build_status() -> dict | None:

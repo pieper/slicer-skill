@@ -129,12 +129,27 @@ def build_index(name: str, docs: list[tuple[str, str]], out_dir: Path) -> None:
     print(f"[{name}] wrote {size_mb:.1f} MB to {out_dir}")
 
 
+def parse_extra(spec: str) -> tuple[str, Path]:
+    """Parse a --extra NAME=PATH spec into (name, path)."""
+    if "=" not in spec:
+        raise argparse.ArgumentTypeError(f"--extra must be NAME=PATH, got {spec!r}")
+    name, _, raw_path = spec.partition("=")
+    name = name.strip().lower()
+    if not name:
+        raise argparse.ArgumentTypeError(f"--extra has empty NAME in {spec!r}")
+    return name, Path(raw_path).expanduser()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--target", choices=("source", "discourse", "all"), default="all")
     parser.add_argument("--source-dir", type=Path, default=SOURCE_DIR)
     parser.add_argument("--discourse-dir", type=Path, default=DISCOURSE_DIR)
     parser.add_argument("--out", type=Path, default=INDEX_DIR)
+    parser.add_argument(
+        "--extra", action="append", default=[], metavar="NAME=PATH",
+        help="Index an additional source-style corpus at PATH under index name NAME. Repeatable.",
+    )
     args = parser.parse_args()
 
     if args.target in ("source", "all"):
@@ -156,6 +171,17 @@ def main() -> int:
             print(f"[discourse] {len(paths)} candidate files")
             docs = load_documents(paths, args.discourse_dir)
             build_index("discourse", docs, args.out / "discourse")
+
+    for spec in args.extra:
+        name, root = parse_extra(spec)
+        if not root.exists():
+            print(f"[{name}] not found at {root} — skipping")
+            continue
+        print(f"[{name}] scanning {root}...")
+        paths = list(iter_source_files(root))
+        print(f"[{name}] {len(paths)} candidate files")
+        docs = load_documents(paths, root)
+        build_index(name, docs, args.out / name)
 
     return 0
 
