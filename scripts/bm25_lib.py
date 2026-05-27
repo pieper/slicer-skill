@@ -16,6 +16,24 @@ import bm25s
 WORD_RE = re.compile(r"[A-Za-z][A-Za-z0-9_]*|\d+")
 CAMEL_RE = re.compile(r"[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+|\d+")
 
+# Map language names with non-word characters to bareword aliases before
+# WORD_RE swallows them. Without this, "C++" tokenizes to just "c" because
+# `+` doesn't fit `[A-Za-z0-9_]`. Applied identically at index and query
+# time so the rewrite is symmetric.
+_LANG_ALIAS_RE = [
+    (re.compile(r"(?<![A-Za-z])C\+\+"), " Cplusplus "),
+    (re.compile(r"(?<![A-Za-z])C#"),    " Csharp "),
+    (re.compile(r"(?<![A-Za-z])F#"),    " Fsharp "),
+    (re.compile(r"\bObjective-?C\b"),   " ObjectiveC "),
+]
+
+
+def normalize_lang_names(text: str) -> str:
+    """Rewrite C++/C#/F#/Objective-C to bareword aliases (cplusplus, etc.)."""
+    for pat, repl in _LANG_ALIAS_RE:
+        text = pat.sub(repl, text)
+    return text
+
 
 def tokenize(text: str) -> list[str]:
     """BM25 tokenizer for mixed code+prose.
@@ -23,7 +41,11 @@ def tokenize(text: str) -> list[str]:
     Emits each identifier as a whole token (so `vtkMRMLScalarVolumeNode` matches
     exactly) AND the CamelCase / snake_case parts (so a query for `volume node`
     matches it too). Lowercases everything. No stemming, no stopword removal.
+
+    Language names with special chars (C++, C#, F#) are normalized to
+    `cplusplus`/`csharp`/`fsharp` first, so they survive WORD_RE.
     """
+    text = normalize_lang_names(text)
     out: list[str] = []
     for m in WORD_RE.finditer(text):
         w = m.group(0)

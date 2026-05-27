@@ -30,6 +30,7 @@ from build_bm25 import (  # noqa: E402  — reuse the same file walker
     iter_source_files,
     load_documents,
     parse_extra,
+    strip_html,
 )
 from vector_lib import (  # noqa: E402
     EMBED_DIM,
@@ -125,7 +126,7 @@ def main() -> int:
             print(f"[discourse] scanning {args.discourse_dir}...")
             paths = list(iter_discourse_files(args.discourse_dir))
             print(f"[discourse] {len(paths)} candidate files")
-            docs = load_documents(paths, args.discourse_dir)
+            docs = load_documents(paths, args.discourse_dir, transform=strip_html)
             build_index("discourse", docs, args.out / "discourse")
 
     for spec in args.extra:

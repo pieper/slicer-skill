@@ -13,16 +13,33 @@ Indexes are written to .bm25-index/{source,discourse}/ in the workspace.
 from __future__ import annotations
 
 import argparse
+import html
 import json
+import re
 import sys
 import time
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 
 import bm25s
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bm25_lib import tokenize  # noqa: E402
+
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def strip_html(text: str) -> str:
+    """Drop HTML tags and decode entities. Used for Discourse-rendered posts,
+    where every paragraph is wrapped in <p>...</p>, links carry attributes,
+    and entities like &lt; / &gt; / &quot; appear inline. Stripping these
+    keeps `p`, `href`, `lt`, `quot`, `blockquote`, etc. out of the index so
+    BM25 IDF and snippet selection focus on real content.
+
+    Not applied to code corpora (C++/Python/CMake/UI/XML) where angle-
+    bracket content carries meaning (templates, UI element names, etc.).
+    """
+    return html.unescape(_HTML_TAG_RE.sub(" ", text))
 
 WORKSPACE = Path(__file__).resolve().parent.parent
 
@@ -57,8 +74,17 @@ def iter_discourse_files(root: Path) -> Iterator[Path]:
     yield from rendered.rglob("*.md")
 
 
-def load_documents(paths: Iterable[Path], root: Path) -> list[tuple[str, str]]:
-    """Read files into (relpath, text). Skip oversized or unreadable files."""
+def load_documents(
+    paths: Iterable[Path],
+    root: Path,
+    transform: Callable[[str], str] | None = None,
+) -> list[tuple[str, str]]:
+    """Read files into (relpath, text). Skip oversized or unreadable files.
+
+    Optional `transform` is applied to each file's text before indexing.
+    Used to strip HTML from Discourse-rendered Markdown so the index isn't
+    polluted with tag/attribute tokens.
+    """
     docs: list[tuple[str, str]] = []
     skipped_size = 0
     skipped_io = 0
@@ -76,6 +102,8 @@ def load_documents(paths: Iterable[Path], root: Path) -> list[tuple[str, str]]:
         except OSError:
             skipped_io += 1
             continue
+        if transform is not None:
+            text = transform(text)
         rel = str(p.relative_to(root))
         docs.append((rel, text))
     if skipped_size or skipped_io:
@@ -169,7 +197,7 @@ def main() -> int:
             print(f"[discourse] scanning {args.discourse_dir}...")
             paths = list(iter_discourse_files(args.discourse_dir))
             print(f"[discourse] {len(paths)} candidate files")
-            docs = load_documents(paths, args.discourse_dir)
+            docs = load_documents(paths, args.discourse_dir, transform=strip_html)
             build_index("discourse", docs, args.out / "discourse")
 
     for spec in args.extra:
