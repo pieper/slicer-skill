@@ -213,6 +213,7 @@ def tool_write_file(args):
     path = args["path"]
     content = args["content"]
     encoding = args.get("encoding", "utf-8")
+    import os
     os.makedirs(os.path.dirname(path), exist_ok=True)
     if encoding == "base64":
         data = base64.b64decode(content)
