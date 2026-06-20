@@ -152,3 +152,7 @@ environment** rather than on your everyday workstation:
 By keeping Slicer and the MCP server in an isolated environment you limit the
 blast radius of any unintended or malicious actions and reduce the chance of
 accidentally exposing sensitive data.
+
+## License
+
+This project is licensed under the [Apache License 2.0](LICENSE).
