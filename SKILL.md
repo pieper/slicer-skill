@@ -18,6 +18,33 @@ that is designed to answer questions about the [3D Slicer](https://www.slicer.or
 its extension ecosystem.  It is intentionally generic so that it can be consumed by any tool that
 understands the SKILLS.md convention (e.g. Claude Code, OpenAI agents, etc.).
 
+## NEVER post publicly under the user's identity without explicit, specific approval
+
+The `gh` CLI and Discourse endpoints in this skill are for **READING and SEARCHING ONLY**. The agent
+must **never** perform a write/publish action that appears under the user's name or account without
+the user's explicit, specific go-ahead **for that exact action** — regardless of how reasonable the
+action seems. This covers, non-exhaustively:
+
+- GitHub: creating/closing/reopening/merging issues or PRs; posting or editing **any** comment, PR
+  review, or release note; adding labels/assignees; `gh pr comment/close/create/review`, `gh issue
+  create/comment/close`, `gh api` mutations (POST/PATCH/PUT/DELETE).
+- Slicer Discourse (`discourse.slicer.org`): creating topics, replies, or edits.
+- Any other public or shared venue (mailing lists, wikis, chat) reachable from the tooling.
+
+Rules:
+
+1. **A user statement of intent is NOT authorization.** "I'm going to close it", "I'll reply", "let's
+   close this" means the **user** will do it themselves. It is never a request for the agent to do it.
+   If you are not certain the user is asking *you* to post, assume they are not.
+2. **The user controls the exact wording of anything public.** When a post/comment/close seems
+   warranted, **draft the text and hand it to the user to post** (or to paste after explicit approval).
+   Do not compose-and-send in one step.
+3. **Why this matters:** a public message the agent sends under the user's name is one the user did
+   not write and must now remember they did not write. Surprise posts erode the user's ability to
+   track their own communications and their control over their public voice. Treat every such action
+   as outward-facing and irreversible.
+4. Reading, searching, cloning, and local analysis via these tools remain fine and need no approval.
+
 ## Setup Modes
 
 The setup script (`./setup.sh`) has two orthogonal axes:
@@ -454,6 +481,78 @@ Slicer uses CMake with a SuperBuild pattern:
 - For module-level CMake patterns, read `CMakeLists.txt` in any module under
   `Modules/Loadable/` or `Modules/CLI/`.
 
+### macOS Packaging and Qt6 Startup (hard-won)
+
+The macOS `.app` has **no launcher process** (unlike Linux/Windows and unlike the
+build tree, which use the CTK application launcher). The app self-configures its
+environment in the `qSlicerCoreApplication` constructor body — but that runs
+*after* the `QApplication` base constructor has already loaded the Qt platform
+plugin. See `Base/QTApp/qSlicerApplicationHelper.cxx::preInitializeApplication`,
+which runs from `main()` *before* the app object and sets `QT_PLUGIN_PATH` for
+exactly this reason.
+
+**Qt6 platform-plugin resolution order** (traced from qtbase `src/gui/kernel/`
+`qguiapplication.cpp` `init_platform` + `qplatformintegrationfactory.cpp` +
+`src/corelib/plugin/qfactoryloader.cpp` + `qcoreapplication.cpp` `libraryPathsLocked`):
+1. `QT_QPA_PLATFORM_PLUGIN_PATH` (the "extra search path"). This — *not*
+   `QT_PLUGIN_PATH` — is the path shown in the error `Could not find the Qt
+   platform plugin "cocoa" in "<path>"`. It is usually empty (`""`), which is a
+   red herring, not the cause.
+2. Each `QCoreApplication::libraryPaths()` entry + `/platforms`, where
+   `libraryPaths()` = `QT_PLUGIN_PATH` entries + the Qt install `PluginsPath`
+   (overridable by a `qt.conf` `[Paths] Plugins=` entry) + the bundle's
+   `Contents/PlugIns`.
+
+Slicer installs plugins to `Contents/lib/QtPlugins` (non-standard) and points
+`QT_PLUGIN_PATH` there. That is correct **only if the plugin is a real, loadable
+file**. The message wording distinguishes the failure: "Could not **find** …"
+means the plugin never entered `keyMap()` (missing / dangling / not a valid
+plugin); "Could not **load** … even though it was found" means the file was
+present but failed to load (bad deps, wrong Qt, invalid signature).
+
+**Bundle fixup pipeline** (`CMake/SlicerCPackBundleFixup.cmake.in`, configured to
+`Slicer-build/CMake/SlicerCPackBundleFixup/`): CPack stages the `.app` (as
+`Slicer.app`), runs BundleUtilities `fixup_bundle()` to copy external libs/Qt
+frameworks in and rewrite install names to `@rpath/...`, re-signs, then renames to
+the display name. `Slicer_QtPlugins_DIR` = `lib/QtPlugins`; embedded frameworks
+live in `Contents/Frameworks`, referenced as `@rpath/Frameworks/Qt*.framework/...`.
+
+**macOS Qt6 packaging pitfalls seen in practice** (a distributable bundle must
+be validated by launching it *off the build machine* — packageverify only checks
+Mach-O resolution and misses all of these):
+- **Homebrew ships plugins as symlinks** into the versioned Cellar
+  (`share/qt/plugins/platforms/libqcocoa.dylib -> ../../../../Cellar/...`).
+  `install(PROGRAMS)` copies the symlink verbatim, so it dangles once the bundle
+  moves. Resolve `REALPATH` before installing (`SlicerBlockInstallQtPlugins.cmake`).
+- **Two copies of Qt loaded** ("You might be loading two sets of Qt binaries",
+  `moveToThread` failures, duplicate objc classes): a bundled binary still
+  references the external Qt (absolute `/opt/homebrew/...` or a bare
+  `@rpath/QtCore.framework` that resolves via a leftover `/opt/homebrew/lib`
+  rpath). Every Qt dependency of every embedded Mach-O — plugins *and* frameworks
+  — must be rewritten to `@rpath/Frameworks/...`. The framework-repair step must
+  rewrite the repaired framework's own deps, not just its id.
+- **`codesign --deep` leaves invalid signatures** on a bundle this large/nested
+  (the CFBundleExecutable is a small bootstrap, so the real app binary and every
+  module/plugin/framework is *nested* code). On Apple Silicon that is a fatal
+  `EXC_BAD_ACCESS` / SIGKILL "Code Signature Invalid" at load. Sign **inside-out**
+  instead — every Mach-O on its own, deepest first, `.app` last
+  (`Utilities/Scripts/SlicerSignBundleMacOS.py`).
+- **Startup prewarm must tolerate a read-only install**: the stamp goes in the
+  user cache (`~/Library/Caches/<App>/`), never inside the bundle, and prewarm
+  failure must never block launch (`SlicerAppBootstrap.c.in`, `SlicerPrewarm.py`).
+
+**Diagnosing a bundle that won't launch off-machine:**
+- `codesign --verify --deep --strict <app>` and read `~/Library/Logs/`
+  `DiagnosticReports/<app>-*.ips` — `termination.namespace == "CODESIGNING"` /
+  `"Invalid Page"` is a signature problem, not a code bug.
+- `DYLD_PRINT_LIBRARIES=1 <app>/Contents/MacOS/SlicerApp-real ...` then grep the
+  loaded image paths for `/opt/homebrew/` or `/Cellar/` — any Qt loaded from
+  there means an un-rewritten dependency.
+- Launch headless to a clean exit: `SlicerApp-real --no-splash --python-code
+  "import qt; qt.QTimer.singleShot(3000, slicer.app.quit)"` (`rc=0` = clean).
+- Broken plugin symlinks: `find <app>/Contents/lib/QtPlugins -type l` (should be
+  empty after the REALPATH install fix).
+
 ### Extension Development
 
 To understand how extensions are structured and distributed:
@@ -685,40 +784,22 @@ for each step of common multi-step tasks.
 
 The file `slicer-mcp-server.py` in this repository implements an MCP server that runs
 inside Slicer, exposing tools like `execute_python`, `screenshot`, `list_nodes`,
-`write_file`, and `read_file` over HTTP at `http://localhost:2026/mcp`.
+`write_file`, and `read_file` over HTTP at `http://localhost:2026/mcp`.  This turns a
+running Slicer into something the agent can observe and drive directly.
 
-### File Transfer — Use the `/file` Endpoint
+**Why it matters: prefer observation over recollection.**  When a question is checkable —
+why a module misbehaves, whether an API still exists, what a snippet actually returns,
+how a change affects the scene — running the code in a live Slicer beats reasoning from
+documentation and memory.  **Offer to start a dedicated Slicer instance** rather than
+launching one unannounced, and never take over a Slicer the user started; it may hold
+unsaved work.  Because each instance can pick its own port, several Slicers (different
+releases, a local build vs. a release, local vs. remote) can run at once, which makes
+differential debugging possible: send identical code to each endpoint and diff the results.
 
-When syncing files to or from a remote Slicer instance, **always use the raw HTTP
-`/file` endpoint** instead of passing file content through `execute_python`.  Sending
-file content via `execute_python` requires the LLM to generate the entire file as
-output tokens (at ~50–100 tokens/sec), making even small files take tens of seconds.
-The `/file` endpoint transfers bytes directly — disk to HTTP to disk — completing in
-milliseconds.
-
-**Upload a file to the Slicer host:**
-```sh
-curl -X POST "http://localhost:2026/file?path=/absolute/path/on/remote.py" \
-     --data-binary @local_file.py
-```
-
-**Download a file from the Slicer host:**
-```sh
-curl "http://localhost:2026/file?path=/absolute/path/on/remote.py" -o local_file.py
-```
-
-**Sync multiple files** by running parallel curl commands or a simple loop:
-```sh
-for f in src/*.py; do
-  curl -s -X POST "http://localhost:2026/file?path=/tmp/remote/$(basename $f)" \
-       --data-binary @"$f"
-done
-```
-
-The MCP tools `write_file` and `read_file` are also available for small,
-programmatic file operations within an LLM tool-call workflow, but the `/file`
-HTTP endpoint should be preferred for bulk transfers or any file larger than a
-few hundred bytes.
+**Read [`references/mcp.md`](references/mcp.md) for the mechanics** — choosing a free port,
+the bootstrap script and launch flags, verifying the endpoint, running several instances
+for differential debugging, provisioning remote instances over an SSH tunnel, and the
+`/file` endpoint for bulk file transfer.
 
 ---
 
