@@ -220,6 +220,18 @@ fi
 : "${SLICER_DEP_DIR:=slicer-dependencies}"
 : "${SLICER_PROJECTWEEK_DIR:=slicer-projectweek}"
 
+# Resolve a possibly-overridden directory: absolute paths (from env var
+# overrides) are returned as-is; relative (default) paths are anchored to
+# SCRIPT_DIR.  Without this, "$SCRIPT_DIR/$SLICER_SRC_DIR" would produce a
+# bogus nested path whenever an override is an absolute path.
+resolve_dir() {
+    local dir="$1"
+    case "$dir" in
+        /*) echo "$dir" ;;
+        *) echo "$SCRIPT_DIR/$dir" ;;
+    esac
+}
+
 # optional filter: space-separated list of extension names to fetch.  Leave empty to
 # clone everything.
 EXTENSION_FILTER=""
@@ -534,7 +546,7 @@ setup_search_indexes() {
         return 0
     fi
 
-    if [ ! -d "$SCRIPT_DIR/$SLICER_SRC_DIR" ] && [ ! -d "$SCRIPT_DIR/$SLICER_DISCOURSE_DIR" ]; then
+    if [ ! -d "$(resolve_dir "$SLICER_SRC_DIR")" ] && [ ! -d "$(resolve_dir "$SLICER_DISCOURSE_DIR")" ]; then
         echo "  No local source/discourse clones found — index build skipped."
         return 0
     fi
@@ -546,7 +558,7 @@ setup_search_indexes() {
     local -a extra_args=()
     if [ "$MODE" = "full" ]; then
         for dep in CTK vtkAddon SlicerExecutionModel; do
-            dep_path="$SCRIPT_DIR/$SLICER_DEP_DIR/$dep"
+            dep_path="$(resolve_dir "$SLICER_DEP_DIR")/$dep"
             if [ -d "$dep_path" ]; then
                 # Lowercase index name so the MCP tool is search_ctk, etc.
                 lname=$(echo "$dep" | tr '[:upper:]' '[:lower:]')
@@ -557,8 +569,8 @@ setup_search_indexes() {
 
     # 4a) BM25 (lexical) — fast, runs in seconds, always built
     "$venv_dir/bin/python" "$bm25_builder" \
-        --source-dir "$SCRIPT_DIR/$SLICER_SRC_DIR" \
-        --discourse-dir "$SCRIPT_DIR/$SLICER_DISCOURSE_DIR" \
+        --source-dir "$(resolve_dir "$SLICER_SRC_DIR")" \
+        --discourse-dir "$(resolve_dir "$SLICER_DISCOURSE_DIR")" \
         --out "$SCRIPT_DIR/.bm25-index" \
         "${extra_args[@]}" || {
         echo "  BM25 build failed — lexical search will be unavailable."
@@ -582,8 +594,8 @@ setup_search_indexes() {
         echo "  Launching vector index build in BACKGROUND..."
         # nohup + & + disown: child survives after setup.sh exits, log captured
         nohup "$venv_dir/bin/python" -u "$vec_builder" \
-            --source-dir "$SCRIPT_DIR/$SLICER_SRC_DIR" \
-            --discourse-dir "$SCRIPT_DIR/$SLICER_DISCOURSE_DIR" \
+            --source-dir "$(resolve_dir "$SLICER_SRC_DIR")" \
+            --discourse-dir "$(resolve_dir "$SLICER_DISCOURSE_DIR")" \
             --out "$SCRIPT_DIR/.vector-index" \
             "${extra_args[@]}" \
             > "$vec_log" 2>&1 &
